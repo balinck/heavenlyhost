@@ -4,12 +4,15 @@ import io
 from copy import copy
 from subprocess import Popen, PIPE, STDOUT
 
-os.makedirs(os.path.dirname("./data/"), exist_ok=True)
 DOM5_PATH = os.environ.get("DOM5_PATH") or "./data/dominions5"
-os.environ["DOM5_CONF"] = "./data/dominions5"
-os.environ["DOM5_SAVE"] = "./data/savedgames"
-os.environ["DOM5_LOCALMAPS"] = "./data/maps"
-os.environ["DOM5_MODS"] = "./data/mods"
+DOM5HOST_DATA_PATH = os.environ.get("DOM5HOST_DATA_PATH") or "./data/"
+
+os.environ["DOM5_CONF"] = DOM5HOST_DATA_PATH + "dominions5"
+os.environ["DOM5_SAVE"] = DOM5HOST_DATA_PATH + "savedgames/"
+os.environ["DOM5_LOCALMAPS"] = DOM5HOST_DATA_PATH + "maps/"
+os.environ["DOM5_MODS"] = DOM5HOST_DATA_PATH + "mods/"
+
+os.makedirs(os.path.dirname(DOM5HOST_DATA_PATH), exist_ok=True)
 
 CONFIG_DEFAULT = {
   "name": "",                   # name of saved game, no spaces are allowed
@@ -59,30 +62,26 @@ CONFIG_DEFAULT = {
 
 class Server:
 
-  @classmethod
-  def from_dict(cls, d):
-    serv = cls()
-    for game in d['games']:
-      serv.games.append(Game(**game))
-    return serv
+  def load_json_data(self):
+    games = []
+    for savedgame, _, _ in os.walk(DOM5HOST_DATA_PATH+"savedgames/"):
+      json_path = savedgame + "/host_data.json"
+      if os.path.isfile(json_path):
+        with open(json_path, "r") as file:
+          dict_ = json.load(file)
+        games.append(Game(**dict_))
+    self.games += games
 
-  def as_dict(self):
-    d = {"games": []}
-    for game in self.games:
-      g = copy(game.__dict__)
-      g['process'] = None
-      d["games"].append(g)
-    return d
+  def _dump_json_gamedata(self, game):
+    path = "{}savedgames/{}{}".format(DOM5HOST_DATA_PATH, game.name,"/host_data.json")
+    dict_ = copy(game.__dict__)
+    dict_['process'] = None
+    with open(path, "w+") as file:
+      json.dump(dict_, file, indent=2)
 
-  @classmethod
-  def from_json_data(cls, path="./data/server_data.json"):
-    with open(path, "r") as file:
-      d = json.load(file)
-    return cls.from_dict(d)
-
-  def dump_json(self, path="./data/server_data.json"):
-    with open(path, "w") as file: 
-      json.dump(self.as_dict(), file, indent=2)
+  def dump_all(self):
+    for game in games:
+      self._dump_json_gamedata(game)
 
   def startup(self):
     for game in self.games:
@@ -91,6 +90,7 @@ class Server:
         elif game.process.poll() is not None: game.restart()
 
   def shutdown(self):
+    self.dump_all()
     for game in self.games: game.shutdown()
 
   def add_game(self, **config):
@@ -99,7 +99,10 @@ class Server:
       print("Port {} already in use!".format(config['port']))
     elif any((name == config['name'] for name in (game.name for game in active_games))):
       print("Name \"{} already in use!".format(config['name']))
-    else: self.games.append(Game(**config))
+    else: 
+      game = Game(**config)
+      self.games.append(game)
+      self._dump_json_gamedata(game)
 
   def __init__(self):
     self.games = []
@@ -177,5 +180,3 @@ class Game:
   def restart(self):
     self.shutdown()
     return self.setup()
-
-
