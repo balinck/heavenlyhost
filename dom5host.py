@@ -24,7 +24,7 @@ CONFIG_DEFAULT = {
   "mapfile": None,              # --mapfile XXX   Filename of map. E.g. eye.map
   "randmap": 15,                # --randmap X     Make and use a random map with X prov per player (10,15,20)
   "noclientstart": False,       # --noclientstart Clients cannot start the game during Choose Participants
-  "statuspage": False,          # --statuspage XX Create html page that shows who needs to play their turn
+  "statuspage": True,           # --statuspage XX Create html page that shows who needs to play their turn
   "scoredump": True,            # --scoredump     Create a score file after each turn (scores.html)
 # World Contents
   "magicsites": 50,             # --magicsites X  Magic site frequency 0-75 (default 40)
@@ -93,7 +93,7 @@ class Server:
   def shutdown(self):
     for game in self.games: game.shutdown()
 
-  def add_game(self, config):
+  def add_game(self, **config):
     active_games = [game for game in self.games if not game.finished]
     if any((port == config['port'] for port in (game.port for game in active_games))): 
       print("Port {} already in use!".format(config['port']))
