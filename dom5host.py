@@ -5,16 +5,6 @@ import asyncio
 from copy import copy
 from subprocess import Popen, PIPE, STDOUT
 
-DOM5_PATH = os.environ.get("DOM5_PATH") or "./data/dominions5"
-DOM5HOST_DATA_PATH = os.environ.get("DOM5HOST_DATA_PATH") or "./data/"
-
-os.environ["DOM5_CONF"] = DOM5HOST_DATA_PATH + "dominions5"
-os.environ["DOM5_SAVE"] = DOM5HOST_DATA_PATH + "savedgames/"
-os.environ["DOM5_LOCALMAPS"] = DOM5HOST_DATA_PATH + "maps/"
-os.environ["DOM5_MODS"] = DOM5HOST_DATA_PATH + "mods/"
-
-os.makedirs(os.path.dirname(DOM5HOST_DATA_PATH), exist_ok=True)
-
 _CONFIG_DEFAULT = {
   "name": "",                   # name of saved game, no spaces are allowed
   "nosteam": True,              # --nosteam       Do not connect to steam (workshop will be unavailable) 
@@ -64,22 +54,35 @@ _CONFIG_DEFAULT = {
 
 class Server:
 
+  def __init__(self, dom5_path=None, data_path=None):
+    self.games = []
+    self.path = os.getcwd()
+    if not dom5_path: self.dom5_path = os.environ.get("DOM5_PATH") or "./data/dominions5/"
+    if not data_path: self.data_path = os.environ.get("DOM5HOST_DATA_PATH") or "./data/"
+    self.conf_path = self.data_path + "dominions5/"
+    self.savedgame_path = self.data_path + "savedgames/"
+    self.map_path = self.data_path + "maps/"
+    self.mod_path = self.data_path + "mods/"
+    os.environ["DOM5_CONF"] = self.conf_path
+    os.environ["DOM5_SAVE"] = self.savedgame_path
+    os.environ["DOM5_LOCALMAPS"] = self.map_path
+    os.environ["DOM5_MODS"] = self.mod_path
+    os.makedirs(os.path.dirname(self.data_path), exist_ok=True)
+
   def _load_json_data(self):
-    games = []
-    for savedgame, _, _ in os.walk(DOM5HOST_DATA_PATH+"savedgames/"):
+    for savedgame, _, _ in os.walk(self.savedgame_path):
       json_path = savedgame + "/host_data.json"
       if os.path.isfile(json_path):
         with open(json_path, "r") as file:
           dict_ = json.load(file)
-        games.append(Game(**dict_))
-    self.games += games
+        self.add_game(**dict_)
 
   def _dump_json_gamedata(self, game):
-    path = "{}savedgames/{}{}".format(DOM5HOST_DATA_PATH, game.name,"/host_data.json")
-    os.makedirs(os.path.dirname("{}savedgames/{}/".format(DOM5HOST_DATA_PATH, game.name)), exist_ok=True)
+    os.makedirs(os.path.dirname(game.path), exist_ok=True)
+    file_path = game.path + "host_data.json"
     dict_ = copy(game.__dict__)
     dict_['process'] = None
-    with open(path, "w+") as file:
+    with open(file_path, "w+") as file:
       json.dump(dict_, file, indent=2)
 
   def _dump_all(self):
@@ -108,18 +111,23 @@ class Server:
     for game in self.games: game.shutdown()
 
   def add_game(self, **config):
-    active_games = [game for game in self.games if not game.finished]
-    if any((port == config['port'] for port in (game.port for game in active_games))): 
-      print("Port {} already in use!".format(config['port']))
-    elif any((name == config['name'] for name in (game.name for game in active_games))):
+    if (not config['finished'] 
+        and any(port == config['port'] 
+        for port in (game.port for game in self.games if not game.finished))):
+
+      print("Port {} already in use in active game!".format(config['port']))
+
+    elif (any(name == config['name'] 
+          for name in (game.name for game in self.games))):
+
       print("Name \"{} already in use!".format(config['name']))
+
     else: 
       game = Game(**config)
+      game.path = "{}{}/".format(self.savedgame_path, game.name)
+      game.dom5_path = self.dom5_path
       self.games.append(game)
       self._dump_json_gamedata(game)
-
-  def __init__(self):
-    self.games = []
 
 class Game:
 
@@ -127,10 +135,12 @@ class Game:
     self.__dict__.update(_CONFIG_DEFAULT)
     self.__dict__.update(config)
     self.process = None
+    self.path = ""
+    self.dom5_path = ""
 
   def _setup_command(self):
     return [str(com) for com in [
-      DOM5_PATH+"/dom5_amd64", "-S", "-T", "--tcpserver",
+      self.dom5_path + "dom5_amd64", "-S", "-T", "--tcpserver",
       "--nosteam" if self.nosteam else "",
       "--port", self.port,             
       "--postexec" if self.postexec else "", self.postexec or "",       
@@ -142,7 +152,8 @@ class Game:
       "--mapfile" if self.mapfile else "", self.mapfile or "",        
       "--randmap" if self.randmap else "", self.randmap,          
       "--noclientstart" if self.noclientstart else "", 
-      "--statuspage" if self.statuspage else "", "./data/savedgames/{}/statuspage.html".format(self.name) if self.statuspage else "",     
+      "--statuspage" if self.statuspage else "", 
+      "./data/savedgames/{}/statuspage.html".format(self.name) if self.statuspage else "",     
       "--scoredump" if self.scoredump else "",      
       "--magicsites", self.magicsites,       
       "--indepstr", self.indepstr,          
@@ -171,7 +182,7 @@ class Game:
       "--masterpass" if self.masterpass else "", self.masterpass or ""] if com != ""]
 
   def _query_command(self):
-    return [str(com) for com in [DOM5_PATH+"/dom5.sh", "-T", "--tcpquery", "--ipadr", "localhost", "--port", self.port, "--nosteam"] if com != ""]
+    return [str(com) for com in [self.dom5_path + "dom5.sh", "-T", "--tcpquery", "--ipadr", "localhost", "--port", self.port, "--nosteam"] if com != ""]
 
   def setup(self):
     proc = Popen(self._setup_command(), stdin=PIPE, stdout=PIPE, stderr=STDOUT)
@@ -186,7 +197,7 @@ class Game:
 
   def shutdown(self):
     if self.process and self.process.poll() is None: self.process.kill()
-    with open("{}savedgames/{}/log.txt".format(DOM5HOST_DATA_PATH, self.name), "a") as file:
+    with open(self.path + "log.txt", "a") as file:
       for line in io.TextIOWrapper(self.process.stdout, encoding="utf-8"): file.write(line)
     self.process = None
 
