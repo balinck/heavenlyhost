@@ -1,6 +1,7 @@
 import os
 import json
 import io
+import asyncio
 from copy import copy
 from subprocess import Popen, PIPE, STDOUT
 
@@ -14,11 +15,12 @@ os.environ["DOM5_MODS"] = DOM5HOST_DATA_PATH + "mods/"
 
 os.makedirs(os.path.dirname(DOM5HOST_DATA_PATH), exist_ok=True)
 
-CONFIG_DEFAULT = {
+_CONFIG_DEFAULT = {
   "name": "",                   # name of saved game, no spaces are allowed
   "nosteam": True,              # --nosteam       Do not connect to steam (workshop will be unavailable) 
   "port": 0,                    # --port X        Use this port nbr
-  "postexec": None,             # --postexec CMD  Execute this command after each new turn
+  "postexec":                   # --postexec CMD  Execute this command after each new turn
+  "echo \"turn complete\" > /tmp/heavenly",
   "preexec": None,              # --preexec CMD   Execute this command before each new turn
   "era": 1,                     # --era X         New game created in this era (1-3)
   "teamgame": False,            # --teamgame      Disciple game, multiple players on same team
@@ -62,7 +64,7 @@ CONFIG_DEFAULT = {
 
 class Server:
 
-  def load_json_data(self):
+  def _load_json_data(self):
     games = []
     for savedgame, _, _ in os.walk(DOM5HOST_DATA_PATH+"savedgames/"):
       json_path = savedgame + "/host_data.json"
@@ -74,14 +76,26 @@ class Server:
 
   def _dump_json_gamedata(self, game):
     path = "{}savedgames/{}{}".format(DOM5HOST_DATA_PATH, game.name,"/host_data.json")
+    os.makedirs(os.path.dirname("{}savedgames/{}/".format(DOM5HOST_DATA_PATH, game.name)), exist_ok=True)
     dict_ = copy(game.__dict__)
     dict_['process'] = None
     with open(path, "w+") as file:
       json.dump(dict_, file, indent=2)
 
-  def dump_all(self):
-    for game in games:
+  def _dump_all(self):
+    for game in self.games:
       self._dump_json_gamedata(game)
+
+  async def listen_pipe(self):
+    pipe_path = "/tmp/heavenly"
+    if not os.path.exists(pipe_path):
+      os.mkfifo(pipe_path)
+    pipe_fd = os.open(pipe_path, os.O_RDONLY | os.O_NONBLOCK)
+    pipe = os.fdopen(pipe_fd)
+    while True:
+      msg = pipe.readline()
+      if msg: print("Received:", msg)
+      await asyncio.sleep(5)
 
   def startup(self):
     for game in self.games:
@@ -90,7 +104,7 @@ class Server:
         elif game.process.poll() is not None: game.restart()
 
   def shutdown(self):
-    self.dump_all()
+    self._dump_all()
     for game in self.games: game.shutdown()
 
   def add_game(self, **config):
@@ -110,7 +124,7 @@ class Server:
 class Game:
 
   def __init__(self, **config):
-    self.__dict__.update(CONFIG_DEFAULT)
+    self.__dict__.update(_CONFIG_DEFAULT)
     self.__dict__.update(config)
     self.process = None
 
@@ -164,7 +178,6 @@ class Game:
     proc.stdin.write(bytes(self.name, "utf-8"))
     proc.stdin.close()
     self.process = proc
-    return proc
 
   def query(self):
     proc = Popen(self._query_command())
@@ -173,10 +186,10 @@ class Game:
 
   def shutdown(self):
     if self.process and self.process.poll() is None: self.process.kill()
-    with open("./data/savedgames/{}/log.txt".format(self.name), "a") as file:
+    with open("{}savedgames/{}/log.txt".format(DOM5HOST_DATA_PATH, self.name), "a") as file:
       for line in io.TextIOWrapper(self.process.stdout, encoding="utf-8"): file.write(line)
     self.process = None
 
   def restart(self):
     self.shutdown()
-    return self.setup()
+    self.setup()
