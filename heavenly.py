@@ -4,13 +4,15 @@ import io
 import asyncio
 from copy import copy
 from subprocess import Popen, PIPE, STDOUT
+import requests
 
-_CONFIG_DEFAULT = {
-  "name": "",                   # name of saved game, no spaces are allowed
+from notify import *
+
+_GAME_DEFAULTS = {
   "nosteam": True,              # --nosteam       Do not connect to steam (workshop will be unavailable) 
   "port": 0,                    # --port X        Use this port nbr
   "postexec":                   # --postexec CMD  Execute this command after each new turn
-  "echo \"turn complete\" > /tmp/heavenly",
+  "echo \"postexec {}\" > /tmp/heavenly",
   "preexec": None,              # --preexec CMD   Execute this command before each new turn
   "era": 1,                     # --era X         New game created in this era (1-3)
   "teamgame": False,            # --teamgame      Disciple game, multiple players on same team
@@ -31,7 +33,7 @@ _CONFIG_DEFAULT = {
   "startprov": 1,               # --startprov X   Number of starting provinces (1-9)
 # Divine Rules   
   "eventrarity": 2,             # --eventrarity X Random event rarity 1-2, 1=common 2=rare
-  "global_enchantments": 5,     # --globals X     Global Enchantment slots 3-9 (default 5)
+  "globals": 5,                 # --globals X     Global Enchantment slots 3-9 (default 5)
   "thrones": [3, 0, 0],         # --thrones X Y Z  Number of thrones of level 1, 2 and 3
   "requiredap": 3,              # --requiredap X   Ascension points required for victory (def total-1)
   "conqall": False,             # --conqall        Win by eliminating all opponents only
@@ -48,8 +50,7 @@ _CONFIG_DEFAULT = {
   # Advanced    
   "nocheatdet": False,          # --nocheatdet    Turns off cheat detection
   "renaming": False,            # --renaming      Enable commander renaming
-  "masterpass": None,           # --masterpass XX Master password. E.g. masterblaster  
-  "finished": False             # Used by server to track active/archived games
+  "masterpass": None,           # --masterpass XX Master password. E.g. masterblaster
   }
 
 class Server:
@@ -74,20 +75,26 @@ class Server:
       json_path = savedgame + "/host_data.json"
       if os.path.isfile(json_path):
         with open(json_path, "r") as file:
-          dict_ = json.load(file)
-        self.add_game(**dict_)
+          game = Game._decode_json(file)
+        self.add_game(game)
 
   def _dump_json_gamedata(self, game):
     os.makedirs(os.path.dirname(game.path), exist_ok=True)
     file_path = game.path + "host_data.json"
-    dict_ = copy(game.__dict__)
-    dict_['process'] = None
     with open(file_path, "w+") as file:
-      json.dump(dict_, file, indent=2)
+      game._encode_json(file)
 
   def _dump_all(self):
     for game in self.games:
       self._dump_json_gamedata(game)
+
+  def _handle_pipe_in(self, msg):
+    cmd, name = msg.split()
+    game = list(filter(lambda g: g.name == name, self.games))[0]
+    if cmd == "preexec":
+      game.on_preexec()
+    if cmd == "postexec":
+      game.on_postexec()
 
   async def listen_pipe(self):
     pipe_path = "/tmp/heavenly"
@@ -97,7 +104,9 @@ class Server:
     pipe = os.fdopen(pipe_fd)
     while True:
       msg = pipe.readline()
-      if msg: print("Received:", msg)
+      if msg: 
+        print("Received:", msg)
+        self._handle_pipe_in(msg)
       await asyncio.sleep(5)
 
   def startup(self):
@@ -110,79 +119,81 @@ class Server:
     self._dump_all()
     for game in self.games: game.shutdown()
 
-  def add_game(self, **config):
-    if (not config['finished'] 
-        and any(port == config['port'] 
-        for port in (game.port for game in self.games if not game.finished))):
+  def add_game(self, game_to_add):
+    if (not game_to_add.finished 
+        and any(game.settings['port'] == game_to_add.settings['port'] 
+        for game in self.games if not game.finished)):
 
-      print("Port {} already in use in active game!".format(config['port']))
+      print("Port {} already in use in active game!".format(game_to_add.settings['port']))
 
-    elif (any(name == config['name'] 
-          for name in (game.name for game in self.games))):
+    elif (any(name == game_to_add.name
+          for game.name in self.games)):
 
-      print("Name \"{} already in use!".format(config['name']))
+      print("Name \"{}\" already in use!".format(game_to_add.settings['name']))
 
     else: 
-      game = Game(**config)
-      game.path = "{}{}/".format(self.savedgame_path, game.name)
-      game.dom5_path = self.dom5_path
-      self.games.append(game)
-      self._dump_json_gamedata(game)
+      game_to_add.path = "{}{}/".format(self.savedgame_path, game_to_add.name)
+      game_to_add.dom5_path = self.dom5_path
+      self.games.append(game_to_add)
+      self._dump_json_gamedata(game_to_add)
 
 class Game:
 
-  def __init__(self, **config):
-    self.__dict__.update(_CONFIG_DEFAULT)
-    self.__dict__.update(config)
+  def __init__(self, name, **game_settings):
+    self.name = name
+    self.finished = False
     self.process = None
     self.path = ""
     self.dom5_path = ""
+    self.notifier = None 
+
+    self.settings = {}
+    self.settings.update(_GAME_DEFAULTS)
+    self.settings.update(game_settings)
+
+    self.settings['postexec'] = self.settings['postexec'].format(self.name)
+
+  def _encode_json(self, file):
+    game_settings = copy(self.settings)
+    metadata = {
+    "name": self.name,
+    "finished": self.finished,
+    "process": None,
+    "path": self.path,
+    "dom5_path": self.dom5_path,
+    "notifier": self.notifier._as_dict() if self.notifier else None }
+    return json.dump({"game_settings": game_settings, "metadata": metadata}, file, indent=2)
+
+  @classmethod
+  def _decode_json(cls, file):
+    dict_ = json.load(file)
+    notifier = dict_["metadata"].get("notifier")
+    if notifier: 
+      restored_notifier = Notifier._from_dict(notifier)
+      dict_["metadata"]["notifier"] = restored_notifier
+    name = dict_["metadata"]["name"]
+    game = cls(name, **dict_["game_settings"])
+    game.__dict__.update(dict_["metadata"])
+    return game
 
   def _setup_command(self):
-    return [str(com) for com in [
-      self.dom5_path + "dom5_amd64", "-S", "-T", "--tcpserver",
-      "--nosteam" if self.nosteam else "",
-      "--port", self.port,             
-      "--postexec" if self.postexec else "", self.postexec or "",       
-      "--preexec" if self.preexec else "", self.preexec or "", 
-      "--era", self.era,               
-      "--teamgame" if self.teamgame else "",                        # TODO: implement team games
-      "--clustered" if self.clustered else "",     
-      "--closed", [],                                               # TODO: implement closing nations
-      "--mapfile" if self.mapfile else "", self.mapfile or "",        
-      "--randmap" if self.randmap else "", self.randmap,          
-      "--noclientstart" if self.noclientstart else "", 
-      "--statuspage" if self.statuspage else "", 
-      "./data/savedgames/{}/statuspage.html".format(self.name) if self.statuspage else "",     
-      "--scoredump" if self.scoredump else "",      
-      "--magicsites", self.magicsites,       
-      "--indepstr", self.indepstr,          
-      "--richness", self.richness,        
-      "--resources", self.resources,       
-      "--recruitment", self.recruitment,     
-      "--supplies", self.supplies,        
-      "--startprov", self.startprov,         
-      "--eventrarity", self.eventrarity,       
-      "--globals", self.global_enchantments,           
-      "--thrones", self.thrones,   
-      "--requiredap", self.requiredap,        
-      "--conqall" if self.conqall else "",       
-      "--cataclysm" if self.cataclysm else "",     
-      "--hofsize", self.hofsize,          
-      "--noartrest" if self.noartrest else "",     
-      "--research", self.research,          
-      "--norandres" if self.norandres else "",     
-      "--nostoryevents" if self.nostoryevents else "",  
-      "--storyevents" if self.storyevents else "",   
-      "--allstoryevents" if self.allstoryevents else "",
-      "--scoregraphs" if self.scoregraphs else "",   
-      "--nonationinfo" if self.nonationinfo else "",   
-      "--nocheatdet" if self.nocheatdet else "",    
-      "--renaming" if self.renaming else "",      
-      "--masterpass" if self.masterpass else "", self.masterpass or ""] if com != ""]
+    command = [self.dom5_path + "dom5_amd64", "-S", "-T", "--tcpserver"]
+    for key, value in self.settings.items():
+      if key == "closed":   # TODO: implement closing nations
+        pass
+      elif key == "teamgame": # TODO: implement team games
+        pass
+      elif type(value) == type(True):
+        if value is True:
+          command += ["--{}".format(key)]
+        else:
+          pass
+      elif value:
+        command += ["--{}".format(key), str(value)]
+    return command
 
   def _query_command(self):
-    return [str(com) for com in [self.dom5_path + "dom5.sh", "-T", "--tcpquery", "--ipadr", "localhost", "--port", self.port, "--nosteam"] if com != ""]
+    return [str(com) for com in [self.dom5_path + "dom5.sh", "-T", "--tcpquery", "--ipadr", "localhost", "--port", self.settings['port'], "--nosteam"] if com != ""]
 
   def setup(self):
     proc = Popen(self._setup_command(), stdin=PIPE, stdout=PIPE, stderr=STDOUT)
@@ -204,3 +215,10 @@ class Game:
   def restart(self):
     self.shutdown()
     self.setup()
+
+  def on_preexec(self):
+    pass
+
+  def on_postexec(self):
+    if self.notifier:
+      self.notifier.notify("{} has just completed a turn.".format(self.name))
