@@ -4,6 +4,7 @@ import io
 import asyncio
 from copy import copy
 from subprocess import Popen, PIPE, STDOUT
+from pathlib import Path
 import requests
 
 from notify import *
@@ -57,30 +58,30 @@ class Server:
 
   def __init__(self, dom5_path=None, data_path=None):
     self.games = []
-    self.path = os.getcwd()
-    if not dom5_path: self.dom5_path = os.environ.get("DOM5_PATH") or "./data/dominions5/"
-    if not data_path: self.data_path = os.environ.get("DOM5HOST_DATA_PATH") or "./data/"
-    self.conf_path = self.data_path + "dominions5/"
-    self.savedgame_path = self.data_path + "savedgames/"
-    self.map_path = self.data_path + "maps/"
-    self.mod_path = self.data_path + "mods/"
-    os.environ["DOM5_CONF"] = self.conf_path
-    os.environ["DOM5_SAVE"] = self.savedgame_path
-    os.environ["DOM5_LOCALMAPS"] = self.map_path
-    os.environ["DOM5_MODS"] = self.mod_path
-    os.makedirs(os.path.dirname(self.data_path), exist_ok=True)
+    self.path = Path('').resolve()
+    if not dom5_path: self.dom5_path = Path(os.environ.get("DOM5_PATH") or "./data/dominions5/").resolve()
+    if not data_path: self.data_path = Path(os.environ.get("DOM5HOST_DATA_PATH") or "./data/").resolve()
+    self.conf_path = self.data_path / "dominions5"
+    self.savedgame_path = self.data_path / "savedgames"
+    self.map_path = self.data_path / "maps"
+    self.mod_path = self.data_path / "mods"
+    os.environ["DOM5_CONF"] = str(self.conf_path)
+    os.environ["DOM5_SAVE"] = str(self.savedgame_path)
+    os.environ["DOM5_LOCALMAPS"] = str(self.map_path)
+    os.environ["DOM5_MODS"] = str(self.mod_path)
+    self.data_path.mkdir(exist_ok=True)
 
   def _load_json_data(self):
     for savedgame, _, _ in os.walk(self.savedgame_path):
-      json_path = savedgame + "/host_data.json"
-      if os.path.isfile(json_path):
+      json_path = Path(savedgame) / "host_data.json"
+      if json_path.exists():
         with open(json_path, "r") as file:
           game = Game._decode_json(file)
         self.add_game(game)
 
   def _dump_json_gamedata(self, game):
-    os.makedirs(os.path.dirname(game.path), exist_ok=True)
-    file_path = game.path + "host_data.json"
+    game.path.mkdir(exist_ok=True)
+    file_path = game.path / "host_data.json"
     with open(file_path, "w+") as file:
       game._encode_json(file)
 
@@ -97,8 +98,8 @@ class Server:
       game.on_postexec()
 
   async def listen_pipe(self):
-    pipe_path = "/tmp/heavenly"
-    if not os.path.exists(pipe_path):
+    pipe_path = Path("/tmp/heavenly")
+    if not pipe_path.exists:
       os.mkfifo(pipe_path)
     pipe_fd = os.open(pipe_path, os.O_RDONLY | os.O_NONBLOCK)
     pipe = os.fdopen(pipe_fd)
@@ -132,7 +133,7 @@ class Server:
       print("Name \"{}\" already in use!".format(game_to_add.settings['name']))
 
     else: 
-      game_to_add.path = "{}{}/".format(self.savedgame_path, game_to_add.name)
+      game_to_add.path = self.savedgame_path / game_to_add.name#"{}{}/".format(self.savedgame_path, game_to_add.name)
       game_to_add.dom5_path = self.dom5_path
       self.games.append(game_to_add)
       self._dump_json_gamedata(game_to_add)
@@ -159,8 +160,8 @@ class Game:
     "name": self.name,
     "finished": self.finished,
     "process": None,
-    "path": self.path,
-    "dom5_path": self.dom5_path,
+    "path": str(self.path),
+    "dom5_path": str(self.dom5_path),
     "notifier": self.notifier._as_dict() if self.notifier else None }
     return json.dump({"game_settings": game_settings, "metadata": metadata}, file, indent=2)
 
@@ -174,10 +175,11 @@ class Game:
     name = dict_["metadata"]["name"]
     game = cls(name, **dict_["game_settings"])
     game.__dict__.update(dict_["metadata"])
+    game.path, game.dom5_path = Path(game.path), Path(game.dom5_path)
     return game
 
   def _setup_command(self):
-    command = [self.dom5_path + "dom5_amd64", "-S", "-T", "--tcpserver"]
+    command = [str(self.dom5_path / "dom5_amd64"), "-S", "-T", "--tcpserver"]
     for key, value in self.settings.items():
       if key == "closed":   # TODO: implement closing nations
         pass
@@ -193,7 +195,7 @@ class Game:
     return command
 
   def _query_command(self):
-    return [str(com) for com in [self.dom5_path + "dom5.sh", "-T", "--tcpquery", "--ipadr", "localhost", "--port", self.settings['port'], "--nosteam"] if com != ""]
+    return [str(com) for com in [str(self.dom5_path / "dom5.sh"), "-T", "--tcpquery", "--ipadr", "localhost", "--port", self.settings['port'], "--nosteam"] if com != ""]
 
   def setup(self):
     proc = Popen(self._setup_command(), stdin=PIPE, stdout=PIPE, stderr=STDOUT)
@@ -208,7 +210,7 @@ class Game:
 
   def shutdown(self):
     if self.process and self.process.poll() is None: self.process.kill()
-    with open(self.path + "log.txt", "a") as file:
+    with open(self.path / "log.txt", "a") as file:
       for line in io.TextIOWrapper(self.process.stdout, encoding="utf-8"): file.write(line)
     self.process = None
 
