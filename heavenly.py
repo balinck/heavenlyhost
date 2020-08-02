@@ -90,7 +90,11 @@ class Server:
       self._dump_json_gamedata(game)
 
   def _handle_pipe_in(self, msg):
-    cmd, name = msg.split()
+    try:
+      cmd, name = msg.split()
+    except ValueError:
+      print("Invalid command.")
+      return
     game = list(filter(lambda g: g.name == name, self.games))[0]
     if cmd == "preexec":
       game.on_preexec()
@@ -98,9 +102,10 @@ class Server:
       game.on_postexec()
 
   async def listen_pipe(self):
-    pipe_path = Path("/tmp/heavenly")
-    if not pipe_path.exists:
-      os.mkfifo(pipe_path)
+    pipe_path = self.path / "/tmp/heavenly"
+    if pipe_path.exists():
+      os.remove(pipe_path)
+    os.mkfifo(pipe_path)
     pipe_fd = os.open(pipe_path, os.O_RDONLY | os.O_NONBLOCK)
     pipe = os.fdopen(pipe_fd)
     while True:
@@ -127,13 +132,13 @@ class Server:
 
       print("Port {} already in use in active game!".format(game_to_add.settings['port']))
 
-    elif (any(name == game_to_add.name
-          for game.name in self.games)):
+    elif (any(game.name == game_to_add.name
+          for game in self.games)):
 
       print("Name \"{}\" already in use!".format(game_to_add.settings['name']))
 
     else: 
-      game_to_add.path = self.savedgame_path / game_to_add.name#"{}{}/".format(self.savedgame_path, game_to_add.name)
+      game_to_add.path = self.savedgame_path / game_to_add.name
       game_to_add.dom5_path = self.dom5_path
       self.games.append(game_to_add)
       self._dump_json_gamedata(game_to_add)
@@ -181,7 +186,9 @@ class Game:
   def _setup_command(self):
     command = [str(self.dom5_path / "dom5_amd64"), "-S", "-T", "--tcpserver"]
     for key, value in self.settings.items():
-      if key == "closed":   # TODO: implement closing nations
+      if key == "statuspage" and value:
+        command += ["--statuspage", str(self.path / "status.html")]
+      elif key == "closed":   # TODO: implement closing nations
         pass
       elif key == "teamgame": # TODO: implement team games
         pass

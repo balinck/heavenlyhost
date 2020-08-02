@@ -1,0 +1,42 @@
+
+{% block title %}   
+<div class="page-header">
+      <h1> Heavenly Host </h1>
+</div> 
+{% endblock %}
+
+{% block page_content %}
+<table>
+  <tr>
+    <th>Active Games</th>
+    <th>Status</th>
+  </tr>
+{% for game in games %}
+{% if not game.finished %}
+  </tr>
+    <td><a href="{{url_for('game_status', name=game.name)}}">{{game.name}}</a></td>
+    <td>???</td>
+  </tr>
+{% endif %}
+{% endfor %}
+</table>
+
+<table>
+  <tr>
+    <th>Past Games</th>
+  </tr>
+{% for game in games %}
+{% if game.finished %}
+  </tr>
+    <td>{{ game.name }}</td>
+  </tr>
+{% endif %}
+{% endfor %}
+</table>
+
+
+
+
+
+
+{% endblock %}
