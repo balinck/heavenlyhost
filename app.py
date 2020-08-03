@@ -4,8 +4,9 @@ from wtforms import StringField, SubmitField, TextAreaField, HiddenField
 from wtforms.validators import DataRequired
 from quart import Quart, render_template, send_file, url_for
 import asyncio
-from heavenly import Server
 from pathlib import Path
+
+from heavenly import Server
 
 app = Quart(__name__)
 
@@ -31,6 +32,7 @@ async def startup():
   heavenly_server._load_json_data()
   heavenly_server.startup()
   app.config.update({"heavenly_server": heavenly_server})
+  heavenly_server.init_pipe()
   loop = asyncio.get_event_loop()
   loop.create_task(heavenly_server.listen_pipe())
 

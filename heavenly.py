@@ -12,8 +12,7 @@ from notify import *
 _GAME_DEFAULTS = {
   "nosteam": True,              # --nosteam       Do not connect to steam (workshop will be unavailable) 
   "port": 0,                    # --port X        Use this port nbr
-  "postexec":                   # --postexec CMD  Execute this command after each new turn
-  "echo \"postexec {}\" > /tmp/heavenly",
+  "postexec": True,             # --postexec CMD  Execute this command after each new turn
   "preexec": None,              # --preexec CMD   Execute this command before each new turn
   "era": 1,                     # --era X         New game created in this era (1-3)
   "teamgame": False,            # --teamgame      Disciple game, multiple players on same team
@@ -58,9 +57,14 @@ class Server:
 
   def __init__(self, dom5_path=None, data_path=None):
     self.games = []
-    self.path = Path('').resolve()
-    if not dom5_path: self.dom5_path = Path(os.environ.get("DOM5_PATH") or "./data/dominions5/").resolve()
-    if not data_path: self.data_path = Path(os.environ.get("DOM5HOST_DATA_PATH") or "./data/").resolve()
+    if dom5_path: 
+      self.dom5_path = Path(dom5_path).resolve()
+    else: 
+      self.dom5_path = Path(os.environ.get("DOM5_PATH") or "./data/dominions5/").resolve()
+    if data_path: 
+      self.data_path = Path(data_path).resolve() 
+    else: 
+      self.data_path = Path(os.environ.get("DOM5HOST_DATA_PATH") or "./data/").resolve()
     self.conf_path = self.data_path / "dominions5"
     self.savedgame_path = self.data_path / "savedgames"
     self.map_path = self.data_path / "maps"
@@ -69,7 +73,8 @@ class Server:
     os.environ["DOM5_SAVE"] = str(self.savedgame_path)
     os.environ["DOM5_LOCALMAPS"] = str(self.map_path)
     os.environ["DOM5_MODS"] = str(self.mod_path)
-    self.data_path.mkdir(exist_ok=True)
+    for path in (self.data_path, self.conf_path, self.savedgame_path, self.map_path, self.mod_path):
+      path.mkdir(exist_ok=True)
 
   def _load_json_data(self):
     for savedgame, _, _ in os.walk(self.savedgame_path):
@@ -101,18 +106,23 @@ class Server:
     if cmd == "postexec":
       game.on_postexec()
 
-  async def listen_pipe(self):
-    pipe_path = self.path / "/tmp/heavenly"
+  def init_pipe(self):
+    pipe_path = self.data_path / ".pipe"
     if pipe_path.exists():
       os.remove(pipe_path)
     os.mkfifo(pipe_path)
     pipe_fd = os.open(pipe_path, os.O_RDONLY | os.O_NONBLOCK)
-    pipe = os.fdopen(pipe_fd)
+    self.pipe = os.fdopen(pipe_fd)
+
+  def read_from_pipe(self):
+    msg = self.pipe.readline()
+    if msg: 
+      print("Received:", msg)
+      self._handle_pipe_in(msg)
+
+  async def listen_pipe(self):
     while True:
-      msg = pipe.readline()
-      if msg: 
-        print("Received:", msg)
-        self._handle_pipe_in(msg)
+      self.read_from_pipe()
       await asyncio.sleep(5)
 
   def startup(self):
@@ -157,8 +167,6 @@ class Game:
     self.settings.update(_GAME_DEFAULTS)
     self.settings.update(game_settings)
 
-    self.settings['postexec'] = self.settings['postexec'].format(self.name)
-
   def _encode_json(self, file):
     game_settings = copy(self.settings)
     metadata = {
@@ -186,7 +194,9 @@ class Game:
   def _setup_command(self):
     command = [str(self.dom5_path / "dom5_amd64"), "-S", "-T", "--tcpserver"]
     for key, value in self.settings.items():
-      if key == "statuspage" and value:
+      if key == "postexec" and value:
+        command += ["--postexec", "echo \"postexec {}\" > {}".format(self.name, str(self.path.parent.parent/".pipe"))]
+      elif key == "statuspage" and value:
         command += ["--statuspage", str(self.path / "status.html")]
       elif key == "closed":   # TODO: implement closing nations
         pass

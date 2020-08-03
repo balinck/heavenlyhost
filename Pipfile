@@ -10,6 +10,8 @@ quart = "*"
 requests = "*"
 flask-wtf = "*"
 wtforms = "*"
+pytest = "*"
+pytest-asyncio = "*"
 
 [requires]
 python_version = "3.7"
