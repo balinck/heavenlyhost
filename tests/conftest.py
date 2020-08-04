@@ -1,26 +1,37 @@
 import pytest
 import os
+from copy import copy
+import asyncio
+import sys
+from pathlib import Path
 
-from ..heavenly import Server, Game
-from ..app import app
-from ..notify import Notifier
+sys.path.append(str(Path(__file__).parent.parent))
+from heavenly.host import Host, Game, _GAME_DEFAULTS
+from app import app
+from heavenly.notify import Notifier
+
+@pytest.fixture(name="test_host")
+def _test_host(tmpdir):
+  host = Host(tmpdir)
+  return host
 
 @pytest.fixture(name="test_app")
 @pytest.mark.asyncio
-async def _test_app():
-  await app.startup()
+async def _test_app(test_host):
+  test_host.startup()
+  app.config.update({"heavenly_host": test_host})
+  test_host.init_pipe()
+  loop = asyncio.get_event_loop()
+  loop.create_task(test_host.listen_pipe())
   yield app
   await app.shutdown()
 
-@pytest.fixture(name="test_server")
-def _test_server(tmpdir):
-  server = Server(dom5_path=os.environ['DOM5_PATH'], data_path=tmpdir)
-  return server
-
-@pytest.fixture(name="test_game")
-def _test_game():
-  game = Game("Test_Game", port=2000, mapfile="silentseas.map")
-  return game
+@pytest.fixture(name="test_game_settings")
+def _test_game_settings():
+  settings = copy(_GAME_DEFAULTS)
+  settings["port"] = 2000
+  settings["mapfile"] = "silentseas.map"
+  return settings
 
 @pytest.fixture(name="test_notifier")
 def _test_notifier():
@@ -34,7 +45,7 @@ def _test_notifier():
     def _as_dict(self):
       return {"type": self.name, "attrs": {}}
 
-    def echo(self)
+    def echo(self):
       return self.last_msg
 
   return TestNotifier()
