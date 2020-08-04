@@ -9,13 +9,12 @@ import os
 
 from heavenly.host import Host
 
-
 app = Quart(__name__)
 
 @app.route("/")
 async def home():
   host = app.config.get('heavenly_host')
-  return await render_template("home.html", games=host.games)
+  return await render_template("home.html", games = host.status)
 
 @app.route("/games/<name>")
 async def game_status(name):
@@ -37,6 +36,7 @@ async def startup():
   host.init_pipe()
   loop = asyncio.get_event_loop()
   loop.create_task(host.listen_pipe())
+  loop.create_task(host.ping())
 
 @app.after_serving
 async def shutdown():

@@ -27,4 +27,7 @@ class DiscordNotifier(Notifier):
 
   def notify(self, msg):
     data = {"content": msg}
-    requests.post(self.webhook_url, data=json.dumps(data), headers={"Content-Type": "application/json"})
+    requests.post(self.webhook_url, 
+                  data=json.dumps(data), 
+                  headers={"Content-Type": "application/json"}
+    )

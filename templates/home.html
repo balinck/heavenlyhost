@@ -6,16 +6,19 @@
 {% endblock %}
 
 {% block page_content %}
+{% if games %}
 <table>
   <tr>
     <th>Active Games</th>
     <th>Status</th>
+    <th>Turn</th>
   </tr>
 {% for game in games %}
-{% if not game.finished %}
+{% if not game.status == "Finished" %}
   </tr>
-    <td><a href="{{url_for('game_status', name=game.name)}}">{{game.name}}</a></td>
-    <td>???</td>
+    <td><a href="{{url_for('game_status', name=game.game_name)}}">{{game.game_name}}</a></td>
+    <td>{{game.status}}</td>
+    <td>{{game.turn}}</td>
   </tr>
 {% endif %}
 {% endfor %}
@@ -26,13 +29,16 @@
     <th>Past Games</th>
   </tr>
 {% for game in games %}
-{% if game.finished %}
+{% if game.status == "Finished" %}
   </tr>
     <td>{{ game.name }}</td>
   </tr>
 {% endif %}
 {% endfor %}
 </table>
+{% else %}
+Waiting for game status...
+{% endif %}
 
 
 

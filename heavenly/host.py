@@ -1,19 +1,11 @@
-# * tidy up server/game classes
-#   * no more json dump on add_game
-#   * move ALL game initialization to game.__init__, including paths
-#   * cut down on unnecessary methods and especially unnecessary private methods
-# * add comments/docstrings
-# * game status querying
-# * add exceptions
-# * readonly properties?
-
 import os
 import json
 import io
 import asyncio
 from copy import copy
-from subprocess import Popen, PIPE, STDOUT
+from subprocess import Popen, PIPE, STDOUT, TimeoutExpired
 from pathlib import Path
+from collections import namedtuple
 
 from .notify import Notifier
 
@@ -61,14 +53,24 @@ _GAME_DEFAULTS = {
   "masterpass": None,           # --masterpass XX Master password. E.g. masterblaster
   }
 
+TCPQueryResponse = namedtuple("TCPQueryResponse", ["game_obj", "game_name", "status", "turn"])
+STATUS_TIMEOUT = "Timed out"
+STATUS_ACTIVE = "Game is active"
+STATUS_WAITING = "Game is being setup"  
+
 class Host:
 
   def __init__(
-      self, root_path,
-      dom5_path = Path(os.environ.get("DOM5_PATH")).resolve()):
+      self, 
+      root_path,
+      dom5_path = Path(os.environ.get("DOM5_PATH")).resolve(),
+      ping_interval = 20
+      ):
     self.games = []
     self.root = Path(root_path).resolve()
     self.dom5_path = dom5_path
+    self.ping_interval = ping_interval
+    self.status = None
     self.conf_path = self.root / "dominions5"
     self.savedgame_path = self.root / "savedgames"
     self.map_path = self.root / "maps"
@@ -128,7 +130,7 @@ class Host:
     dict_ = game.as_dict()
     json_path = game.path / "host_data.json"
     with open(json_path, "w+") as file:
-      json.dump(dict_, file)
+      json.dump(dict_, file, indent = 2)
 
   def restore_games(self):
     for dirname, _, _ in os.walk(self.savedgame_path):
@@ -141,6 +143,10 @@ class Host:
   def dump_games(self):
     for game in self.games:
       self.serialize_game(game)
+
+  def query_games(self):
+    responses = [game.query() for game in self.games]
+    return responses
 
   def init_pipe(self):
     pipe_path = self.root / ".pipe"
@@ -162,6 +168,17 @@ class Host:
         game.on_postexec()
       elif cmd == "preexec":
         game.on_preexec()
+
+  async def ping(self):
+    while True:
+      await asyncio.sleep(self.ping_interval)
+      responses = self.query_games()
+      timed_out = [response.game_obj 
+                   for response in responses 
+                   if response.status == STATUS_TIMEOUT]
+      for game in timed_out:
+        game.restart()
+      self.status = responses
 
   async def listen_pipe(self):
     while True:
@@ -293,17 +310,39 @@ class Game:
 
   def setup(self):
     proc = Popen(
-      self.generate_setup_command(), stdin=PIPE, 
-      stdout=PIPE, stderr=STDOUT
+      self.generate_setup_command(), 
+      stdin=PIPE, stdout=PIPE, stderr=STDOUT
     )
     proc.stdin.write(bytes(self.name, "utf-8"))
     proc.stdin.close()
     self.process = proc
 
   def query(self):
-    proc = Popen(self.generate_query_command())
-    stdout, stderr = proc.communicate(timeout=5)
-    return stdout, stderr
+    if self.finished: 
+      return TCPQueryResponse(
+        game_obj = self, game_name = self.name, 
+        status = "Finished", turn = -1
+        )
+    proc = Popen(
+      self.generate_query_command(), 
+      stdout=PIPE, stderr=PIPE
+      )
+    turn = 0
+    status = "Unknown"
+    try:
+      stdout, stderr = proc.communicate(timeout=1)
+    except TimeoutExpired:
+      status = STATUS_TIMEOUT
+    else:
+      for line in stdout.decode().split("\n"):
+        if line.startswith("Status: "):
+          status = line[8:]
+        elif line.startswith("Turn: "):
+          turn = int(line[6:])
+    return TCPQueryResponse(
+      game_obj = self, game_name = self.name, 
+      status = status, turn = turn
+      )
 
   def shutdown(self):
     if self.process and self.process.poll() is None: self.process.kill()

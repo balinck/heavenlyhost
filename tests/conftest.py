@@ -23,6 +23,7 @@ async def _test_app(test_host):
   test_host.init_pipe()
   loop = asyncio.get_event_loop()
   loop.create_task(test_host.listen_pipe())
+  loop.create_task(test_host.ping())
   yield app
   await app.shutdown()
 
