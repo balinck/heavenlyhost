@@ -1,17 +1,25 @@
+{% import "bootstrap/wtf.html" as wtf %}
+{% extends "base.html" %}
+  
+{% block content %}
 
-{% block title %}   
+{{ super() }}
 <div class="page-header">
       <h1> Heavenly Host </h1>
-</div> 
-{% endblock %}
+<a href="{{url_for('new_game')}}">new game setup</a>
+<br>
+</div>
 
-{% block page_content %}
 {% if games %}
-<table>
+<div class="container">
+<div class="row">
+<div class="col-sm-6">
+<table class="table">
   <tr>
     <th>Active Games</th>
     <th>Status</th>
     <th>Turn</th>
+    <th>Address</th>
   </tr>
 {% for game in games %}
 {% if not game.status == "Finished" %}
@@ -19,12 +27,15 @@
     <td><a href="{{url_for('game_status', name=game.game_name)}}">{{game.game_name}}</a></td>
     <td>{{game.status}}</td>
     <td>{{game.turn}}</td>
+    <td>{{address_str(game.game_obj.settings["port"])}}</td>
   </tr>
+
 {% endif %}
 {% endfor %}
 </table>
-
-<table>
+</div>
+<div class="col-sm-6">
+<table class="table">
   <tr>
     <th>Past Games</th>
   </tr>
@@ -36,13 +47,11 @@
 {% endif %}
 {% endfor %}
 </table>
+</div>
+</div>
+</div>
+</div>
 {% else %}
 Waiting for game status...
 {% endif %}
-
-
-
-
-
-
 {% endblock %}

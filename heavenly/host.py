@@ -53,8 +53,11 @@ _GAME_DEFAULTS = {
   "masterpass": None,           # --masterpass XX Master password. E.g. masterblaster
   }
 
+# TODO: don't include the whole game object in TCPQueryResponse
+# TODO: add a dict representing who's played their turn
 TCPQueryResponse = namedtuple("TCPQueryResponse", ["game_obj", "game_name", "status", "turn"])
 STATUS_TIMEOUT = "Timed out"
+STATUS_MAPGEN = "Generating random map"
 STATUS_ACTIVE = "Game is active"
 STATUS_WAITING = "Game is being setup"  
 
@@ -67,34 +70,55 @@ class Host:
       ping_interval = 20
       ):
     self.games = []
-    self.root = Path(root_path).resolve()
-    self.dom5_path = dom5_path
+    self.maps = []
+
     self.ping_interval = ping_interval
     self.status = None
+
+    self.port_range = (1024, 65535)
+
+    self.root = Path(root_path).resolve()
+    self.dom5_path = dom5_path
     self.conf_path = self.root / "dominions5"
     self.savedgame_path = self.root / "savedgames"
     self.map_path = self.root / "maps"
     self.mod_path = self.root / "mods"
+
     os.environ["DOM5_CONF"] = str(self.conf_path)
     os.environ["DOM5_SAVE"] = str(self.savedgame_path)
     os.environ["DOM5_LOCALMAPS"] = str(self.map_path)
     os.environ["DOM5_MODS"] = str(self.mod_path)
+
     for path in (self.root, self.conf_path, self.savedgame_path, 
                  self.map_path, self.mod_path):
       path.mkdir(exist_ok=True)
 
+    for file_path in self.map_path.iterdir():
+      if file_path.suffix == ".map":
+        self.maps.append(file_path.name)
+
   def validate_game_settings(self, name, **game_settings):
     pass
 
-  def create_new_game(self, name, **game_settings):
+  def get_free_port(self):
+    lower, upper = self.port_range
+    for n in range(lower, upper):
+      if not [*self.filter_games_by(finished = False, port = n)]:
+        return n
+    return None
+
+  def create_new_game(self, name, notifiers = None, **game_settings):
     new_game_path = self.savedgame_path / name
     settings_with_defaults = copy(_GAME_DEFAULTS)
     settings_with_defaults.update(game_settings)
-    game = Game(name = name, 
+    if not notifiers:
+      notifiers = []
+    game = Game(name = name,
+                notifiers = notifiers, 
                 path = new_game_path, 
                 dom5_path = self.dom5_path,
                 game_settings = settings_with_defaults
-                )
+    )
     self.games.append(game)
     return game
 
@@ -114,7 +138,7 @@ class Host:
     if match:
       return match[0]
     else:
-      return None 
+      return None
 
   def deserialize_game(self, path_to_game_files):
     json_path = path_to_game_files / "host_data.json"
@@ -183,7 +207,7 @@ class Host:
   async def listen_pipe(self):
     while True:
       self.read_from_pipe()
-      await asyncio.sleep(5)
+      await asyncio.sleep(1)
 
   def startup(self):
     for game in self.games:
@@ -198,16 +222,21 @@ class Host:
 class Game:
 
   def __init__(
-      self, name, 
+      self, name, *,
       path = None, dom5_path = Path(os.environ.get("DOM5_PATH")).resolve(), 
-      notifier = None, finished = False, 
+      notifiers = None, finished = False, turn = 0,
       game_settings = _GAME_DEFAULTS):
     self.name = name
     self.finished = False
     self.process = None
     self.path = path
     self.dom5_path = dom5_path
-    self.notifier = notifier 
+    if not notifiers:
+      self.notifiers = []
+    else:
+      self.notifiers = notifiers
+    self.turn = turn
+    self.status = "Unknown"
     self.settings = copy(game_settings)
     self.path.mkdir(exist_ok = True)
 
@@ -219,7 +248,10 @@ class Game:
       "process": None,
       "path": str(self.path) if self.path else None,
       "dom5_path": str(self.dom5_path),
-      "notifier": self.notifier._as_dict() if self.notifier else None 
+      "notifiers": ([notifier._as_dict() for notifier in self.notifiers] 
+                    if self.notifiers else None
+      ),
+      "turn": self.turn 
     }
     return {"game_settings": game_settings, "metadata": metadata}
 
@@ -232,19 +264,22 @@ class Game:
     path = Path(metadata["path"])
     dom5_path = Path(metadata["dom5_path"])
 
-    notifier_dict = metadata.get("notifier")
-    if notifier_dict:
-      notifier = Notifier._from_dict(notifier_dict)
+    notifier_list = metadata.get("notifiers")
+    if notifier_list:
+      notifiers = [Notifier._from_dict(notifier) for notifier in notifier_list]
     else:
-      notifier = None
+      notifiers = None
 
     finished = metadata.get("finished")
+
+    turn = metadata.get("turn")
     
     game = cls(name = name, 
                path = path, 
                dom5_path = dom5_path, 
-               notifier = notifier,
-               finished = finished, 
+               notifiers = notifiers,
+               finished = finished,
+               turn = turn, 
                game_settings = game_settings)
     return game
 
@@ -292,8 +327,20 @@ class Game:
                         "statuspage": _statuspage_switch
                         }
 
+    if self.is_started():
+      ignored_switches = (set(_GAME_DEFAULTS.keys()) 
+                        - set(["postexec", "preexec", "port", 
+                              "nosteam", "statuspage", "scoredump",
+                              "nocheatdet"
+                              ])
+                          )
+    else:
+      ignored_switches = set()
+
     for switch, value in self.settings.items():
-      if switch in special_switches:
+      if switch in ignored_switches:
+        pass
+      elif switch in special_switches:
         command += special_switches[switch](value)
       elif value is True:
         command += ["--{}".format(switch)]
@@ -317,28 +364,46 @@ class Game:
     proc.stdin.close()
     self.process = proc
 
+  def is_started(self):
+    # if the turn attribute is unreliable, checking for the presence of
+    # a 'ftherland' file instead may be a viable alternative.
+    return self.turn > 0
+
   def query(self):
     if self.finished: 
       return TCPQueryResponse(
         game_obj = self, game_name = self.name, 
-        status = "Finished", turn = -1
+        status = "Finished", turn = self.turn
         )
     proc = Popen(
       self.generate_query_command(), 
       stdout=PIPE, stderr=PIPE
       )
-    turn = 0
+    turn = self.turn
     status = "Unknown"
     try:
-      stdout, stderr = proc.communicate(timeout=1)
+      stdout, stderr = proc.communicate(timeout=5)
     except TimeoutExpired:
-      status = STATUS_TIMEOUT
+      if not self.settings["mapfile"] and turn == 0:
+        # Unfortunately, --tcpquery always times out while the server is 
+        # generating a random map. This hack will keep Host.ping from 
+        # trying to restart us and breaking mapgen until I implement a better
+        # fix.
+        self.status = STATUS_MAPGEN
+        return TCPQueryResponse(
+          game_obj = self, game_name = self.name, 
+          status = STATUS_MAPGEN, turn = turn
+        )
+      else:
+        status = STATUS_TIMEOUT
     else:
       for line in stdout.decode().split("\n"):
         if line.startswith("Status: "):
           status = line[8:]
         elif line.startswith("Turn: "):
           turn = int(line[6:])
+    self.turn = turn
+    self.status = status
     return TCPQueryResponse(
       game_obj = self, game_name = self.name, 
       status = status, turn = turn
@@ -359,5 +424,9 @@ class Game:
     pass
 
   def on_postexec(self):
-    if self.notifier:
-      self.notifier.notify("{} has just completed a turn.".format(self.name))
+    self.turn += 1
+    for notifier in self.notifiers:
+      notifier.notify(
+        "{} has advanced to turn {}.".format(
+          self.name, self.turn)
+    )

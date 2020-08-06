@@ -1,0 +1,52 @@
+{% import "bootstrap/wtf.html" as wtf %}
+{% extends "base.html" %}
+
+{% block content %}
+
+
+<div class="container">
+<div class="row">
+<div class="col-sm-5">
+<h1> Create a new game </h1>
+<form action="" method="post" class="form" role="form">
+{{ form.csrf_token() }}
+
+<h3> Game Settings </h3>
+{{ wtf.form_field(form.name) }}
+{{ wtf.form_field(form.era) }}
+{{ wtf.form_field(form.mapfile) }}
+{{ wtf.form_field(form.randmap) }}
+<h3> World Settings </h3>
+{{ wtf.form_field(form.magicsites) }}
+{{ wtf.form_field(form.indepstr) }}
+{{ wtf.form_field(form.richness) }}
+{{ wtf.form_field(form.resources) }}
+{{ wtf.form_field(form.recruitment) }}
+{{ wtf.form_field(form.supplies) }}
+{{ wtf.form_field(form.startprov) }}
+<h3> Divine Rules </h3>
+{{ wtf.form_field(form.eventrarity) }}
+{{ wtf.form_field(form.global_enchants) }}
+{{ wtf.form_field(form.lvl1_thrones) }}
+{{ wtf.form_field(form.lvl2_thrones) }}
+{{ wtf.form_field(form.lvl3_thrones) }}
+{{ wtf.form_field(form.requiredap) }}
+{{ wtf.form_field(form.cataclysm) }}
+{{ wtf.form_field(form.hofsize) }}
+{{ wtf.form_field(form.artrest) }}
+{{ wtf.form_field(form.research) }}
+{{ wtf.form_field(form.randres) }}
+{{ wtf.form_field(form.storyevents) }}
+{{ wtf.form_field(form.scoregraphs) }}
+{{ wtf.form_field(form.cheatdet) }}
+{{ wtf.form_field(form.renaming) }}
+<h3> Notifications </h3>
+{{ wtf.form_field(form.notifier) }}
+{{ wtf.form_field(form.submit) }}
+</form>
+</div>
+</div>
+</div>
+
+
+{% endblock %}

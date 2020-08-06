@@ -12,6 +12,7 @@ flask-wtf = "*"
 wtforms = "*"
 pytest = "*"
 pytest-asyncio = "*"
+flask-bootstrap = "*"
 
 [requires]
 python_version = "3.7"
