@@ -100,6 +100,27 @@ class Host:
   def validate_game_settings(self, name, **game_settings):
     pass
 
+  def get_nation_dict(self):
+    command = [str(self.dom5_path / "dom5_amd64"), 
+      "-S", "-T", "--nosteam", "--listnations"
+    ]
+    proc = Popen(command, stdout=PIPE, stderr=PIPE)
+    stdout, stderr = proc.communicate(timeout=5)
+
+    nations = {1: {}, 2: {}, 3: {}}
+    for line in stdout.decode().split("\n"):
+      substrings = line.split()
+      if not substrings:
+        pass
+      elif substrings[1] == "Era": 
+        key = int(substrings[2])
+      else:
+        nation_number = int(substrings[0])
+        nation_name = " ".join(substrings[1:])
+        nations[key][nation_number] = nation_name
+    self.nations = nations 
+
+
   def get_free_port(self):
     lower, upper = self.port_range
     for n in range(lower, upper):
@@ -249,7 +270,7 @@ class Game:
       "path": str(self.path) if self.path else None,
       "dom5_path": str(self.dom5_path),
       "notifiers": ([notifier._as_dict() for notifier in self.notifiers] 
-                    if self.notifiers else None
+                    if self.notifiers else []
       ),
       "turn": self.turn 
     }
