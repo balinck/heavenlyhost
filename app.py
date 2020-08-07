@@ -17,7 +17,10 @@ bootstrap = Bootstrap()
 app = Quart(__name__)
 bootstrap.init_app(app)
 maps = ["random"]
-app.config.update({"dom5_maps": maps, 'SECRET_KEY': 'development key'})
+app.config.update({
+  "dom5_maps": maps, 
+  "SECRET_KEY": "development key"
+})
 
 address_str = lambda port: "{}:{}".format(
   request.host_url.split("//")[-1].split(":")[0], port
@@ -65,8 +68,9 @@ async def new_game():
     }
     notifiers = ([DiscordNotifier(webhook_url = form.notifier.data)]
                 if form.notifier.data else None
-    ) 
-    new_game = host.create_new_game(form.name.data, notifiers, **config)
+    )
+    name = form.name.data.replace(" ", "_")
+    new_game = host.create_new_game(name, notifiers, **config)
     new_game.setup()
     address = address_str(config["port"])
     await flash("The Wheel has turned once again. " 
@@ -202,10 +206,14 @@ class NewGameForm(FlaskForm):
     default = True
     )
   cheatdet = BooleanField("Enable cheat detection", default=True)
-  renaming = BooleanField("Enable renaming commanders:")
+  renaming = BooleanField("Enable renaming commanders")
   masterpass = None
 
   # Notifications
-  notifier = StringField("To enable Discord turn notifications, enter a Discord webhook URL:", render_kw=dict(maxlength = 200))
+  notifier = StringField(
+    "To enable Discord turn notifications, enter a Discord webhook URL:", 
+    render_kw = dict(maxlength = 200)
+  )
 
   submit = SubmitField("Submit new game")
+
