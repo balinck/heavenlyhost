@@ -341,11 +341,21 @@ class Game:
       if value:
         return ["--statuspage", self.path / "status.html"]
 
+    def _thrones_switch(value):
+      if value:
+        thrones = ["--thrones"]
+        for n in value: thrones.append(str(n))
+        #thrones.append(" ".join(str(n) for n in value))
+        return thrones
+      else:
+        return []
+
     special_switches = {"postexec": _postexec_switch,
                         "preexec": _preexec_switch, 
                         "closed": _closed_switch,
                         "teamgame": _teamgame_switch,
-                        "statuspage": _statuspage_switch
+                        "statuspage": _statuspage_switch,
+                        "thrones": _thrones_switch
                         }
 
     if self.is_started():

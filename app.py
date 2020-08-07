@@ -39,6 +39,7 @@ async def new_game():
   if form.validate_on_submit():
     host = app.config.get("heavenly_host")
     mapfile = None if form.mapfile.data == "random" else form.mapfile.data
+    thrones = [form.lvl1_thrones.data, form.lvl2_thrones.data, form.lvl3_thrones.data]
 
     config = {"era": form.era.data, 
               "port": host.get_free_port(), 
@@ -51,6 +52,7 @@ async def new_game():
               "supplies": form.supplies.data,
               "startprov": form.startprov.data,
               "eventrarity": form.eventrarity.data,
+              "thrones": thrones,
               "globals": form.global_enchants.data,
               "requiredap": form.requiredap.data,
               "cataclysm": form.cataclysm.data,
