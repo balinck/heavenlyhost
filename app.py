@@ -115,7 +115,7 @@ class NewGameForm(FlaskForm):
 
   int_style = dict(style = "width: 12%", maxlength = 3)
   select_style = dict(style = "width: 40%")
-  string_style = dict(style = "width: 50%", maxlength = 32)
+  string_style = dict(style = "width: 50%", maxlength = 24)
 
   within_range = lambda lower, upper: NumberRange(
     min = lower, max = upper
