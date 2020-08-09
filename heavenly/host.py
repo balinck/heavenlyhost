@@ -345,7 +345,6 @@ class Game:
       if value:
         thrones = ["--thrones"]
         for n in value: thrones.append(str(n))
-        #thrones.append(" ".join(str(n) for n in value))
         return thrones
       else:
         return []
@@ -433,7 +432,6 @@ class Game:
           status = line[8:]
         elif line.startswith("Turn: "):
           turn = int(line[6:])
-    self.turn = turn
     self.status = status
     return TCPQueryResponse(
       game_obj = self, game_name = self.name, 
