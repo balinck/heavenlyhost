@@ -28,6 +28,9 @@ class DiscordNotifier(Notifier):
   def notify(self, msg):
     data = {"content": msg}
     requests.post(self.webhook_url, 
-                  data=json.dumps(data), 
-                  headers={"Content-Type": "application/json"}
+                  data = json.dumps(data), 
+                  headers = {
+                    "Content-Type": "application/json",
+                    "User-Agent": "HeavenlyHost (https://github.com/balinck/heavenlyhost, 1.0.0)"
+                  }
     )
