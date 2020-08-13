@@ -101,10 +101,12 @@ async def startup():
   app.config.update({"heavenly_host": host})
   maps = app.config.get("dom5_maps")
   maps += host.maps
-  host.init_pipe()
-  loop = asyncio.get_event_loop()
-  loop.create_task(host.listen_pipe())
-  loop.create_task(host.ping())
+  # loop = asyncio.get_event_loop()
+  # for game in host.games:
+  #   if not game.players:
+  #     game.get_players()
+  #   loop.create_task(game.listen_stdout())
+  # loop.create_task(host.ping())
 
 @app.after_serving
 async def shutdown():

@@ -21,13 +21,13 @@
     <th>Turn</th>
     <th>Address</th>
   </tr>
-{% for game in games %}
-{% if not game.status == "Finished" %}
+{% for status in games %}
+{% if not status["summary"] == "Finished" %}
   </tr>
-    <td><a href="{{url_for('game_status', name=game.game_name)}}">{{game.game_name}}</a></td>
-    <td>{{game.status}}</td>
-    <td>{{game.turn}}</td>
-    <td>{{address_str(game.game_obj.settings["port"])}}</td>
+    <td><a href="{{url_for('game_status', name=status['name'])}}">{{status["name"]}}</a></td>
+    <td>{{status["summary"]}}</td>
+    <td>{{status["turn"]}}</td>
+    <td>{{address_str(status["port"])}}</td>
   </tr>
 
 {% endif %}
@@ -39,10 +39,10 @@
   <tr>
     <th>Past Games</th>
   </tr>
-{% for game in games %}
-{% if game.status == "Finished" %}
+{% for status in games %}
+{% if status["summary"] == "Finished" %}
   </tr>
-    <td>{{ game.name }}</td>
+    <td>{{ status["name"] }}</td>
   </tr>
 {% endif %}
 {% endfor %}

@@ -6,6 +6,8 @@ from copy import copy
 from subprocess import Popen, PIPE, STDOUT, TimeoutExpired
 from pathlib import Path
 from collections import namedtuple
+from datetime import datetime, timedelta
+import re
 
 from .notify import Notifier
 
@@ -59,7 +61,29 @@ TCPQueryResponse = namedtuple("TCPQueryResponse", ["game_obj", "game_name", "sta
 STATUS_TIMEOUT = "Timed out"
 STATUS_MAPGEN = "Generating random map"
 STATUS_ACTIVE = "Game is active"
-STATUS_WAITING = "Game is being setup"  
+STATUS_SETUP = "Game is being setup"
+STATUS_INIT = "Game is initializing"
+STATUS_UNKNOWN = "Unknown"
+
+re_setup = re.compile(
+    "^Setup port (?P<port>[0-9]+),?" 
+  + "(?P<time_until_start>[^()]*?) ?(?:\(.*\))?,?"
+  + " open: (?P<open>[0-9]+)," 
+  + " players (?P<players>[0-9]+)," 
+  + " ais (?P<ais>[0-9]+)$"
+)
+re_mapgen = re.compile(
+  "(?P<mapgen>Random Map Generation), .*$"
+)
+re_active = re.compile(
+    "(?P<name>[^ ,]+), Connections (?P<connections>[0-9]+)," 
+  + " (?P<time_until_host>[^()]*) (?:\(.*\))$"
+)
+re_whos_played = re.compile(
+  "^(?P<whos_played>(?:\*?[a-zA-Z]{2,3}(?:\+|-) ?)+)$"
+)
+re_next_turn = re.compile("^Generating next turn$")
+
 
 class Host:
 
@@ -73,7 +97,8 @@ class Host:
     self.maps = []
 
     self.ping_interval = ping_interval
-    self.status = None
+    self.shutting_down = False
+    self.status = {}
 
     self.port_range = (1024, 65535)
 
@@ -96,6 +121,9 @@ class Host:
     for file_path in self.map_path.iterdir():
       if file_path.suffix == ".map":
         self.maps.append(file_path.name)
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(self.ping())
 
   def validate_game_settings(self, name, **game_settings):
     pass
@@ -120,7 +148,6 @@ class Host:
         nations[key][nation_number] = nation_name
     self.nations = nations 
 
-
   def get_free_port(self):
     lower, upper = self.port_range
     for n in range(lower, upper):
@@ -132,13 +159,11 @@ class Host:
     new_game_path = self.savedgame_path / name
     settings_with_defaults = copy(_GAME_DEFAULTS)
     settings_with_defaults.update(game_settings)
-    if not notifiers:
-      notifiers = []
     game = Game(name = name,
-                notifiers = notifiers, 
-                path = new_game_path, 
+                notifiers = notifiers,
+                game_settings = settings_with_defaults,
+                path = new_game_path,
                 dom5_path = self.dom5_path,
-                game_settings = settings_with_defaults
     )
     self.games.append(game)
     return game
@@ -166,7 +191,11 @@ class Host:
     if json_path.exists():
       with open(json_path, "r") as file:
           dict_ = json.load(file)
-      game = Game.from_dict(dict_)
+      game = Game.from_dict(
+        dict_, 
+        path = path_to_game_files,
+        dom5_path = self.dom5_path,
+      )
       self.games.append(game)
     else:
       print("no json data found in {}".format(json_path.parent))
@@ -189,46 +218,19 @@ class Host:
     for game in self.games:
       self.serialize_game(game)
 
-  def query_games(self):
-    responses = [game.query() for game in self.games]
-    return responses
-
-  def init_pipe(self):
-    pipe_path = self.root / ".pipe"
-    if pipe_path.exists():
-      os.remove(pipe_path)
-    os.mkfifo(pipe_path)
-    pipe_fd = os.open(pipe_path, os.O_RDONLY | os.O_NONBLOCK)
-    self.pipe = os.fdopen(pipe_fd)
-
-  def read_from_pipe(self):
-    msg = self.pipe.readline()
-    if msg: 
-      try:
-        cmd, name = msg.split()
-      except ValueError:
-        print("host instance received invalid message from pipe: \"{}\"".format(msg))
-      game = self.find_game_by_name(name)
-      if cmd == "postexec":
-        game.on_postexec()
-      elif cmd == "preexec":
-        game.on_preexec()
-
   async def ping(self):
-    while True:
-      await asyncio.sleep(self.ping_interval)
-      responses = self.query_games()
-      timed_out = [response.game_obj 
-                   for response in responses 
-                   if response.status == STATUS_TIMEOUT]
+    await asyncio.sleep(self.ping_interval)
+    while not self.shutting_down:
+      timed_out = [
+        game
+        for game in self.games
+        if game.status["summary"] == STATUS_TIMEOUT
+      ]
       for game in timed_out:
+        print(game.name, "timed out.")
         game.restart()
-      self.status = responses
-
-  async def listen_pipe(self):
-    while True:
-      self.read_from_pipe()
-      await asyncio.sleep(1)
+      self.status = [copy(game.status) for game in self.games]
+      await asyncio.sleep(self.ping_interval)
 
   def startup(self):
     for game in self.games:
@@ -237,71 +239,99 @@ class Host:
         elif game.process.poll() is not None: game.restart()
 
   def shutdown(self):
+    self.shutting_down = True
     self.dump_games()
     for game in self.games: game.shutdown()
 
 class Game:
 
+  metadata_format = set([
+    "name",
+    "turn"
+    "finished",
+    "notifiers",
+    "players"
+    ]
+  )
+
   def __init__(
       self, name, *,
-      path = None, dom5_path = Path(os.environ.get("DOM5_PATH")).resolve(), 
-      notifiers = None, finished = False, turn = 0,
+      path, 
+      dom5_path = Path(os.environ.get("DOM5_PATH")).resolve(),
+      notifiers = None, 
+      finished = False, 
+      turn = 0,
+      players = None,
       game_settings = _GAME_DEFAULTS):
     self.name = name
     self.finished = False
+
     self.process = None
+    self.buffer = []
+
     self.path = path
     self.dom5_path = dom5_path
+    self.path.mkdir(exist_ok = True)
+
     if not notifiers:
       self.notifiers = []
     else:
       self.notifiers = notifiers
+
     self.turn = turn
-    self.status = "Unknown"
+    self.timeout = timedelta(seconds = 90)
     self.settings = copy(game_settings)
-    self.path.mkdir(exist_ok = True)
+    if not players:
+      players = []
+    self.players = players
+
+    self.status = {
+      "name": self.name,
+      "summary": STATUS_INIT,
+      "port": self.settings["port"],
+      "connections": None,
+      "time_until_start": None,
+      "time_until_host": None,
+      "open_slots": None,
+      "ready_players": None,
+      "ready_ais": None,
+      "turn": self.turn,
+      "whos_played": None
+    }
 
   def as_dict(self):
     game_settings = copy(self.settings)
     metadata = {
-      "name": self.name,
-      "finished": self.finished,
-      "process": None,
-      "path": str(self.path) if self.path else None,
-      "dom5_path": str(self.dom5_path),
-      "notifiers": ([notifier._as_dict() for notifier in self.notifiers] 
-                    if self.notifiers else []
-      ),
-      "turn": self.turn 
+      key:value for key, value in self.__dict__.items() 
+      if key in type(self).metadata_format
     }
+
+    notifiers = ([notifier._as_dict() for notifier in self.notifiers] 
+                if self.notifiers else []
+    )
+    metadata.update(notifiers = notifiers)
+
     return {"game_settings": game_settings, "metadata": metadata}
 
   @classmethod
-  def from_dict(cls, dict_):
-    game_settings, metadata = dict_["game_settings"], dict_["metadata"]
-
-    name = metadata["name"]
-
-    path = Path(metadata["path"])
-    dom5_path = Path(metadata["dom5_path"])
-
-    notifier_list = metadata.get("notifiers")
-    if notifier_list:
-      notifiers = [Notifier._from_dict(notifier) for notifier in notifier_list]
-    else:
-      notifiers = None
-
-    finished = metadata.get("finished")
-
-    turn = metadata.get("turn")
+  def from_dict(cls, dict_, **kwargs):
+    game_settings, metadata_dict = dict_["game_settings"], dict_["metadata"]
     
-    game = cls(name = name, 
-               path = path, 
-               dom5_path = dom5_path, 
-               notifiers = notifiers,
-               finished = finished,
-               turn = turn, 
-               game_settings = game_settings)
+    metadata = {
+      key:value for key, value in metadata_dict.items()
+      if key in cls.metadata_format
+    }
+
+    metadata["notifiers"] = [
+      Notifier._from_dict(notifier) 
+      for notifier in metadata_dict["notifiers"]
+    ]
+
+    game = cls(
+      game_settings = game_settings,
+      **kwargs,
+      **metadata
+    )
     return game
 
   def generate_setup_command(self):
@@ -313,7 +343,7 @@ class Game:
           "--postexec",  
           "echo \"postexec {}\" > {}".format(
             self.name, 
-            self.path.parent.parent / ".pipe"
+            self.path / ".pipe"
             )
         ]
       else:
@@ -325,7 +355,7 @@ class Game:
           "--preexec",  
           "echo \"preexec {}\" > {}".format(
             self.name, 
-            self.path.parent.parent / ".pipe"
+            self.path / ".pipe"
             )
         ]
       else:
@@ -376,6 +406,7 @@ class Game:
         command += ["--{}".format(switch)]
       elif value:
         command += ["--{}".format(switch), str(value)]
+
     return command
 
   def generate_query_command(self):
@@ -386,62 +417,137 @@ class Game:
     ] if com != ""]
 
   def setup(self):
+    pipe_path = self.path / ".pipe"
+    if pipe_path.exists():
+      os.remove(pipe_path)
+    os.mkfifo(pipe_path)
+    read_pipe_fd = os.open(pipe_path, os.O_RDONLY | os.O_NONBLOCK)
+    write_pipe_fd = os.open(pipe_path, os.O_WRONLY | os.O_NONBLOCK)
+    self.pipe = os.fdopen(read_pipe_fd)
     proc = Popen(
       self.generate_setup_command(), 
-      stdin=PIPE, stdout=PIPE, stderr=STDOUT
+      stdin=PIPE, stdout=write_pipe_fd, stderr=STDOUT
     )
     proc.stdin.write(bytes(self.name, "utf-8"))
     proc.stdin.close()
     self.process = proc
+    self.status["summary"] = STATUS_INIT
+    loop = asyncio.get_event_loop()
+    loop.create_task(self.listen_stdout())
+
+  # status = {"name": "",
+  #           "port": 0
+  #           "summary": "",
+  #           "connections": 0,
+  #           "time_to_start": "",
+  #           "time_to_host": "",
+  #           "open_slots": 0,
+  #           "ready_players": 0,
+  #           "ready_ais": 0,
+  #           "whos_played": {} }
+
+  def update_status(self, msg):
+    setup = re_setup.match(msg)
+    if setup:
+      status = {
+        "summary": STATUS_SETUP,
+        "time_until_start": setup.groupdict()["time_until_start"],
+        "open_slots": setup.groupdict()["open"],
+        "ready_players": setup.groupdict()["players"],
+        "ready_ais": setup.groupdict()["ais"]
+      }
+      self.status.update(status)
+      return
+
+    active = re_active.match(msg)
+    if active:
+      if self.turn == 0:
+        self.turn = 1
+      status = {
+        "summary": STATUS_ACTIVE,
+        "connections": active.groupdict()["connections"],
+        "time_until_host": active.groupdict()["time_until_host"],
+        "turn": self.turn
+      }
+      self.status.update(status)
+      return
+
+    mapgen = re_mapgen.match(msg)
+    if mapgen:
+      status = {
+        "summary": STATUS_MAPGEN
+      }
+      self.status.update(status)
+      return
+
+    whos_played = re_whos_played.match(msg)
+    if whos_played and self.players:
+      who = {}
+      for nation, status in zip(self.players, msg.split()):
+        who[nation] = {}
+        who[nation]["connected"] = "*" in status
+        who[nation]["played"] = "+" in status
+      self.status["whos_played"] = who
+      return
+
+    next_turn = re_next_turn.match(msg)
+    if next_turn:
+      self.turn += 1
+      self.status.update(dict(turn = self.turn))
+
+  async def listen_stdout(self):
+    print(self.name, "now listening to STDOUT!")
+    last = datetime.now()
+    while not self.pipe.closed:
+      for line in iter(self.pipe.readline, ""):
+        last = datetime.now()
+        #print("({}) Received: {}".format(self.name, line))
+        log = "[{}] {}".format(datetime.now().ctime(), line)
+        self.buffer.append(log)
+        self.update_status(line)
+        #print(self.status)
+      if (datetime.now() - last) > self.timeout:
+        print("Setting status to TIMEOUT.")
+        self.status["summary"] = STATUS_TIMEOUT
+        self.pipe.close()
+        return
+      await asyncio.sleep(1)
+    print("Pipe must have closed. Stopped listening to STDOUT.")
+    return
 
   def is_started(self):
     # if the turn attribute is unreliable, checking for the presence of
     # a 'ftherland' file instead may be a viable alternative.
     return self.turn > 0
 
+  def get_players(self):
+    players = []
+    regex = re.compile("^player (?P<nation_number>[0-9]+):.*$")
+    for line in self.query().split("\n"):
+      match = regex.match(line)
+      if match:
+        nation_number = match.groupdict().get("nation_number")
+        players.append(nation_number)
+    self.players = copy(players)
+    print("PLAYERS:", self.players)
+
   def query(self):
-    if self.finished: 
-      return TCPQueryResponse(
-        game_obj = self, game_name = self.name, 
-        status = "Finished", turn = self.turn
-        )
     proc = Popen(
       self.generate_query_command(), 
       stdout=PIPE, stderr=PIPE
       )
-    turn = self.turn
-    status = "Unknown"
     try:
-      stdout, stderr = proc.communicate(timeout=5)
+      stdout, stderr = proc.communicate(timeout = 10)
     except TimeoutExpired:
-      if not self.settings["mapfile"] and turn == 0:
-        # Unfortunately, --tcpquery always times out while the server is 
-        # generating a random map. This hack will keep Host.ping from 
-        # trying to restart us and breaking mapgen until I implement a better
-        # fix.
-        self.status = STATUS_MAPGEN
-        return TCPQueryResponse(
-          game_obj = self, game_name = self.name, 
-          status = STATUS_MAPGEN, turn = turn
-        )
-      else:
-        status = STATUS_TIMEOUT
+      print("tcpquery on {} timed out.".format(self.name))
     else:
-      for line in stdout.decode().split("\n"):
-        if line.startswith("Status: "):
-          status = line[8:]
-        elif line.startswith("Turn: "):
-          turn = int(line[6:])
-    self.status = status
-    return TCPQueryResponse(
-      game_obj = self, game_name = self.name, 
-      status = status, turn = turn
-      )
+      return stdout.decode()
 
   def shutdown(self):
     if self.process and self.process.poll() is None: self.process.kill()
+    self.pipe.close()
     with open(self.path / "log.txt", "a") as file:
-      for line in io.TextIOWrapper(self.process.stdout, encoding="utf-8"): 
+      for line in self.buffer: 
         file.write(line)
     self.process = None
 
