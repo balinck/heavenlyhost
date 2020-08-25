@@ -10,6 +10,7 @@ import os
 
 from heavenly.host import Host
 from heavenly.notify import DiscordNotifier
+from heavenly.config.app import APP_NAME, MOTD, HOST_ROOT_PATH
 
 # TODO: separate reorganize into views.py, forms.py, config.py, etc
 
@@ -18,6 +19,8 @@ app = Quart(__name__)
 bootstrap.init_app(app)
 maps = ["random"]
 app.config.update({
+  "APP_NAME": APP_NAME,
+  "MOTD": MOTD,
   "dom5_maps": maps, 
   "SECRET_KEY": "development key"
 })
@@ -27,17 +30,18 @@ address_str = lambda port: "{}:{}".format(
 )
 
 app.jinja_env.globals.update(address_str=address_str)
+app.jinja_env.globals.update(app.config)
 
 @app.route("/")
 async def index():
-  host = app.config.get('heavenly_host')
+  host = app.config.get('host_instance')
   return await render_template("home.html", games = host.status)
 
 @app.route("/new-game", methods = ["GET", "POST"])
 async def new_game():
   form = NewGameForm()
   if form.validate_on_submit():
-    host = app.config.get("heavenly_host")
+    host = app.config.get("host_instance")
     mapfile = None if form.mapfile.data == "random" else form.mapfile.data
     thrones = [form.lvl1_thrones.data, form.lvl2_thrones.data, form.lvl3_thrones.data]
 
@@ -83,34 +87,27 @@ async def new_game():
 
 @app.route("/games/<name>")
 async def game_status(name):
-  host = app.config.get('heavenly_host')
+  host = app.config.get('host_instance')
   game_instance = host.find_game_by_name(name)
   if not game_instance: 
     return "No such game."
   file_path = game_instance.path / "status.html"
-  #return await render_template("game.html", game = game_instance)
   if file_path.exists():
     return await send_file(game_instance.path / "status.html")
   else: return "No status page found." 
 
 @app.before_serving
 async def startup():
-  host = Host(Path("") / "data")
+  host = Host(HOST_ROOT_PATH)
   host.restore_games()
   host.startup()
-  app.config.update({"heavenly_host": host})
+  app.config.update(host_instance = host)
   maps = app.config.get("dom5_maps")
   maps += host.maps
-  # loop = asyncio.get_event_loop()
-  # for game in host.games:
-  #   if not game.players:
-  #     game.get_players()
-  #   loop.create_task(game.listen_stdout())
-  # loop.create_task(host.ping())
 
 @app.after_serving
 async def shutdown():
-  app.config["heavenly_host"].shutdown()
+  app.config["host_instance"].shutdown()
 
 class NewGameForm(FlaskForm):
   maps = app.config.get("dom5_maps")

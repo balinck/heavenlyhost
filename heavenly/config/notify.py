@@ -1,0 +1,1 @@
+USER_AGENT = "HeavenlyHost (https://github.com/balinck/heavenlyhost, 1.0.0)"

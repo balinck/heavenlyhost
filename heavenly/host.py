@@ -435,17 +435,6 @@ class Game:
     loop = asyncio.get_event_loop()
     loop.create_task(self.listen_stdout())
 
-  # status = {"name": "",
-  #           "port": 0
-  #           "summary": "",
-  #           "connections": 0,
-  #           "time_to_start": "",
-  #           "time_to_host": "",
-  #           "open_slots": 0,
-  #           "ready_players": 0,
-  #           "ready_ais": 0,
-  #           "whos_played": {} }
-
   def update_status(self, msg):
     setup = re_setup.match(msg)
     if setup:
@@ -496,7 +485,6 @@ class Game:
       self.status.update(dict(turn = self.turn))
 
   async def listen_stdout(self):
-    print(self.name, "now listening to STDOUT!")
     last = datetime.now()
     while not self.pipe.closed:
       for line in iter(self.pipe.readline, ""):

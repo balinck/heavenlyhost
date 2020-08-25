@@ -1,6 +1,8 @@
 import json
 import requests
 
+from .config.notify import USER_AGENT
+
 class Notifier:
 
   _notifiers = {}
@@ -31,6 +33,6 @@ class DiscordNotifier(Notifier):
                   data = json.dumps(data), 
                   headers = {
                     "Content-Type": "application/json",
-                    "User-Agent": "HeavenlyHost (https://github.com/balinck/heavenlyhost, 1.0.0)"
+                    "User-Agent": USER_AGENT
                   }
     )
