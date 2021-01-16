@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}
+Dom5 - {{game.name}}
+{% endblock %}
+
+
+{% block content %}
+<h3> {{ game.name }} </h3>
+<h4> Status: {{ game.state }} </h4>
+
+<div class="col-sm-4">
+<table class="table">
+  <tr>
+    <th>Nation</th>
+    <th>Turn</th>
+  </tr>
+{% for player_status in players %}
+  <tr>
+    <td>{{player_status[0]}}{{"*" if player_status[2]}}</td>
+    <td>{{player_status[1]}}</td>
+  </tr>
+{% endfor %}
+</table>
+</div>
+{% endblock %}
+

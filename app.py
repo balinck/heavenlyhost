@@ -3,16 +3,14 @@ from flask_wtf import FlaskForm
 from flask_bootstrap import Bootstrap
 from wtforms import StringField, SubmitField, TextAreaField, HiddenField, IntegerField, SelectField, BooleanField
 from wtforms.validators import DataRequired, NumberRange
-from quart import Quart, render_template, send_file, url_for, redirect, flash, request
+from quart import Quart, render_template, send_file, safe_join, url_for, redirect, flash, request
 import asyncio
 from pathlib import Path
 import os
 
 from heavenly.host import Host
 from heavenly.notify import DiscordNotifier
-from heavenly.config.app import APP_NAME, MOTD, HOST_ROOT_PATH
-
-# TODO: separate reorganize into views.py, forms.py, config.py, etc
+from heavenly.config.app import APP_NAME, SERVER_ADDRESS, MOTD, HOST_ROOT_PATH
 
 bootstrap = Bootstrap()
 app = Quart(__name__)
@@ -20,6 +18,7 @@ bootstrap.init_app(app)
 maps = ["random"]
 app.config.update({
   "APP_NAME": APP_NAME,
+  "SERVER_ADDRESS": SERVER_ADDRESS,
   "MOTD": MOTD,
   "dom5_maps": maps, 
   "SECRET_KEY": "development key"
@@ -35,7 +34,17 @@ app.jinja_env.globals.update(app.config)
 @app.route("/")
 async def index():
   host = app.config.get('host_instance')
-  return await render_template("home.html", games = host.status)
+  game_info = []
+  for game in host.games:
+    game_info.append(dict(
+      name = game.name, 
+      state = game.state, 
+      turn = game.turn, 
+      finished = game.finished,
+      port = game.settings["port"]
+    )
+  )
+  return await render_template("home.html", game_info = game_info)
 
 @app.route("/new-game", methods = ["GET", "POST"])
 async def new_game():
@@ -77,7 +86,7 @@ async def new_game():
     )
     name = form.name.data.replace(" ", "_")
     new_game = host.create_new_game(name, notifiers, **config)
-    new_game.setup()
+    asyncio.create_task(new_game.run_until_cancelled())
     address = address_str(config["port"])
     await flash("The Wheel has turned once again. " 
         + "Your game will be available at {} soon.".format(address))
@@ -89,21 +98,38 @@ async def new_game():
 async def game_status(name):
   host = app.config.get('host_instance')
   game_instance = host.find_game_by_name(name)
+  nations = host.nations
+  era = game_instance.settings["era"]
+  players = []
+  for key, value in game_instance.players.items():
+    name = nations[era][value]
+    if key in game_instance.eliminated: turn = "eliminated"
+    else:
+      turn = "unknown"
+      connected = False
+      for _tuple in game_instance.who_played:
+        if _tuple[0] == key:
+          turn = _tuple[1]
+          connected = _tuple[2]
+    players.append((name, turn, connected))
   if not game_instance: 
     return "No such game."
-  file_path = game_instance.path / "status.html"
-  if file_path.exists():
-    return await send_file(game_instance.path / "status.html")
-  else: return "No status page found." 
+  else:
+    return await render_template("game.html", game = game_instance, nations = nations, players = players)
+
 
 @app.before_serving
 async def startup():
   host = Host(HOST_ROOT_PATH)
   host.restore_games()
-  host.startup()
+  #host.startup()
+  asyncio.create_task(host.get_nation_dict())
   app.config.update(host_instance = host)
   maps = app.config.get("dom5_maps")
   maps += host.maps
+  for game in host.games:
+    asyncio.create_task(game.run_until_cancelled())
+  app.config.update(host_instance = host)
 
 @app.after_serving
 async def shutdown():
@@ -167,7 +193,7 @@ class NewGameForm(FlaskForm):
 
   # Divine Rules
   eventrarity = SelectField("Event rarity:", render_kw = select_style, 
-    choices = ["common", "rare"]
+    choices = [(1, "common"), (2, "rare")]
     )
   global_enchants = IntegerField("Global enchantment slots: (3-9)", 
     default = 5, render_kw = int_style, validators = [within_range(3, 9)]

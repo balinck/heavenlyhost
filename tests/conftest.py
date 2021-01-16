@@ -19,7 +19,7 @@ def _test_host(tmpdir):
 @pytest.mark.asyncio
 async def _test_app(test_host):
   test_host.startup()
-  app.config.update({"heavenly_host": test_host})
+  app.config.update({"host_instance": test_host})
   test_host.init_pipe()
   loop = asyncio.get_event_loop()
   loop.create_task(test_host.listen_pipe())

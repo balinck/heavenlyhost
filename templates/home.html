@@ -10,7 +10,7 @@
 <br>
 </div>
 
-{% if games %}
+{% if game_info %}
 <div class="container">
 <div class="row">
 <div class="col-sm-6">
@@ -21,13 +21,13 @@
     <th>Turn</th>
     <th>Address</th>
   </tr>
-{% for status in games %}
-{% if not status["summary"] == "Finished" %}
-  </tr>
-    <td><a href="{{url_for('game_status', name=status['name'])}}">{{status["name"]}}</a></td>
-    <td>{{status["summary"]}}</td>
-    <td>{{status["turn"]}}</td>
-    <td>{{address_str(status["port"])}}</td>
+{% for game in game_info %}
+{% if not game.state == "Finished" %}
+  <tr>
+    <td><a href="{{url_for('game_status', name=game.name)}}">{{game.name}}</a></td>
+    <td>{{game.state}}</td>
+    <td>{{game.turn}}</td>
+    <td>{{address_str(game.port)}}</td>
   </tr>
 
 {% endif %}
@@ -39,10 +39,10 @@
   <tr>
     <th>Past Games</th>
   </tr>
-{% for status in games %}
-{% if status["summary"] == "Finished" %}
+{% for game in game_info %}
+{% if game.state == "Finished" %}
   </tr>
-    <td>{{ status["name"] }}</td>
+    <td>{{ game.name }}</td>
   </tr>
 {% endif %}
 {% endfor %}
