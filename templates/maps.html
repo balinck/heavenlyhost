@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<table class="table">
+  <tr>
+    <th>Title</th>
+    <th>Preview</th>
+    <th>Description</th>
+    <th>Provinces</th>
+    <th>Wraparound?</th>
+  </tr>
+{% for map in maps %}
+  <tr>
+    <td>{{map.title}}</td>
+    <td><img src="/thumb/{{map.thumbnail}}"></td>
+    <td>{{map.description|safe}}</td>
+    <td>{{map.provinces-map.underwater}} + {{map.underwater}} UW</td>
+    <td>{{map.wraparound}}</td>
+  </tr>
+{% endfor %}
+</table>
+
+{% endblock %}

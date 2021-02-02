@@ -15,20 +15,15 @@ from heavenly.config.app import APP_NAME, SERVER_ADDRESS, MOTD, HOST_ROOT_PATH
 bootstrap = Bootstrap()
 app = Quart(__name__)
 bootstrap.init_app(app)
-maps = ["random"]
+map_choices = []
 app.config.update({
   "APP_NAME": APP_NAME,
   "SERVER_ADDRESS": SERVER_ADDRESS,
   "MOTD": MOTD,
-  "dom5_maps": maps, 
+  "map_choices": [("random", "Random")], 
   "SECRET_KEY": "development key"
 })
 
-address_str = lambda port: "{}:{}".format(
-  request.host_url.split("//")[-1].split(":")[0], port
-)
-
-app.jinja_env.globals.update(address_str=address_str)
 app.jinja_env.globals.update(app.config)
 
 @app.route("/")
@@ -117,31 +112,43 @@ async def game_status(name):
   else:
     return await render_template("game.html", game = game_instance, nations = nations, players = players)
 
+@app.route("/maps")
+async def map_directory():
+  host = app.config.get("host_instance")
+  maps = host.maps
+  return await render_template("maps.html", maps = maps)
+
+@app.route("/thumb/<filename>")
+async def get_map_thumb(filename):
+  host = app.config.get("host_instance")
+  path = safe_join(host.map_path, filename)
+  return await send_file(path)
 
 @app.before_serving
 async def startup():
   host = Host(HOST_ROOT_PATH)
   host.restore_games()
-  #host.startup()
   asyncio.create_task(host.get_nation_dict())
-  app.config.update(host_instance = host)
-  maps = app.config.get("dom5_maps")
-  maps += host.maps
   for game in host.games:
     asyncio.create_task(game.run_until_cancelled())
-  app.config.update(host_instance = host)
+  map_choices = app.config.get("map_choices")
+  map_choices.extend([(_map.filename, _map.title) for _map in host.maps])
+  print("MAPCHOICES:", map_choices)
+  print(id(map_choices))
+  app.config.update(host_instance = host, map_choices = map_choices)
 
 @app.after_serving
 async def shutdown():
   app.config["host_instance"].shutdown()
 
 class NewGameForm(FlaskForm):
-  maps = app.config.get("dom5_maps")
+  map_choices = app.config.get("map_choices")
 
   int_style = dict(style = "width: 12%", maxlength = 3)
   select_style = dict(style = "width: 40%")
   string_style = dict(style = "width: 50%", maxlength = 24)
 
+  # ??? why did i write this ???
   within_range = lambda lower, upper: NumberRange(
     min = lower, max = upper
     )
@@ -160,8 +167,9 @@ class NewGameForm(FlaskForm):
   teamgame = None
   clustered = None
   closed = None
+  
   mapfile = SelectField("Choose a map:", 
-    render_kw = select_style, choices = maps
+    render_kw = select_style, choices = map_choices
     )
   randmap = IntegerField(
     "Provinces per player (only applicable to random maps):", 

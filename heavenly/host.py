@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import re
 
 from .notify import Notifier
+from .maps import Dom5Map
 from .dom5 import GAME_DEFAULTS, TCPServer, list_nations, STATUS_TURN_GEN, STATUS_ACTIVE, STATUS_INIT, STATUS_SETUP, STATUS_MAPGEN
 
 class Host:
@@ -47,7 +48,7 @@ class Host:
 
     for file_path in self.map_path.iterdir():
       if file_path.suffix == ".map":
-        self.maps.append(file_path.name)
+        self.maps.append(Dom5Map(file_path))
 
   def validate_game_settings(self, name, **game_settings):
     pass

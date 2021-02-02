@@ -27,7 +27,7 @@
     <td><a href="{{url_for('game_status', name=game.name)}}">{{game.name}}</a></td>
     <td>{{game.state}}</td>
     <td>{{game.turn}}</td>
-    <td>{{address_str(game.port)}}</td>
+    <td>{{SERVER_ADDRESS}}:{{game.port}}</td>
   </tr>
 
 {% endif %}

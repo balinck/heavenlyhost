@@ -13,6 +13,7 @@ wtforms = "*"
 pytest = "*"
 pytest-asyncio = "*"
 flask-bootstrap = "*"
+pillow = "*"
 
 [requires]
 python_version = "3.7"
