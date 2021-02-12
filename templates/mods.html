@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<table class="table">
+  <tr>
+    <th></th>
+    <th>Mod Title</th>
+    <th>Description</th>
+  </tr>
+{% for mod in mods %}
+  <tr>
+    <td><img src="/icon/{{mod.thumbnail}}"></td>
+    <td>{{mod.title}}</td>
+    <td>{{mod.description|safe}}</td>
+  </tr>
+{% endfor %}
+</table>
+
+{% endblock %}

@@ -6,8 +6,9 @@
 {{ super() }}
 <div class="page-header">
       <h1> {{ APP_NAME }} </h1>
-<a href="{{url_for('new_game')}}">new game setup</a>
-<br>
+<a href="{{url_for('new_game')}}">new game setup</a> <br>
+browse supported <a href="{{url_for('map_directory')}}">maps</a> or <a href="{{url_for('mod_directory')}}">mods</a> <br>
+random <a href="{{url_for('random_nation', era = 1)}}">early</a>, <a href="{{url_for('random_nation', era = 2)}}">middle</a>, <a href="{{url_for('random_nation', era = 3)}}">late</a> nation <br>
 </div>
 
 {% if game_info %}
@@ -22,7 +23,7 @@
     <th>Address</th>
   </tr>
 {% for game in game_info %}
-{% if not game.state == "Finished" %}
+{% if not game.finished %}
   <tr>
     <td><a href="{{url_for('game_status', name=game.name)}}">{{game.name}}</a></td>
     <td>{{game.state}}</td>
@@ -40,7 +41,7 @@
     <th>Past Games</th>
   </tr>
 {% for game in game_info %}
-{% if game.state == "Finished" %}
+{% if game.finished %}
   </tr>
     <td>{{ game.name }}</td>
   </tr>

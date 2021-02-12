@@ -1,30 +1,38 @@
 import quart.flask_patch
 from flask_wtf import FlaskForm
 from flask_bootstrap import Bootstrap
-from wtforms import StringField, SubmitField, TextAreaField, HiddenField, IntegerField, SelectField, BooleanField
+from wtforms import StringField, SubmitField, TextAreaField, HiddenField, IntegerField, SelectField, BooleanField, SelectMultipleField
 from wtforms.validators import DataRequired, NumberRange
-from quart import Quart, render_template, send_file, safe_join, url_for, redirect, flash, request
+from quart import Quart, render_template, send_file, safe_join, url_for, redirect, flash, request, abort
+
 import asyncio
 from pathlib import Path
 import os
+from hashlib import shake_128
+import random
 
 from heavenly.host import Host
 from heavenly.notify import DiscordNotifier
-from heavenly.config.app import APP_NAME, SERVER_ADDRESS, MOTD, HOST_ROOT_PATH
+from heavenly.config.app import APP_NAME, SERVER_ADDRESS, MOTD, HOST_ROOT_PATH, SECRET_KEY
 
 bootstrap = Bootstrap()
 app = Quart(__name__)
 bootstrap.init_app(app)
-map_choices = []
+
 app.config.update({
   "APP_NAME": APP_NAME,
   "SERVER_ADDRESS": SERVER_ADDRESS,
   "MOTD": MOTD,
-  "map_choices": [("random", "Random")], 
-  "SECRET_KEY": "development key"
+  "map_choices": [("random", "Random")],
+  "mod_choices": [(None, "None")], 
+  "SECRET_KEY": SECRET_KEY
 })
 
 app.jinja_env.globals.update(app.config)
+
+@app.errorhandler(404)
+async def page_not_found(error):
+  return "404 - page not found"
 
 @app.route("/")
 async def index():
@@ -47,11 +55,13 @@ async def new_game():
   if form.validate_on_submit():
     host = app.config.get("host_instance")
     mapfile = None if form.mapfile.data == "random" else form.mapfile.data
+    mods = form.mods.data
     thrones = [form.lvl1_thrones.data, form.lvl2_thrones.data, form.lvl3_thrones.data]
 
     config = {"era": form.era.data, 
               "port": host.get_free_port(), 
               "mapfile": mapfile,
+              "enablemod": mods,
               "magicsites": form.magicsites.data,
               "indepstr": form.indepstr.data,
               "richness": form.richness.data,
@@ -80,11 +90,17 @@ async def new_game():
                 if form.notifier.data else None
     )
     name = form.name.data.replace(" ", "_")
+    if host.find_game_by_name(name):
+      await flash("A game by that name already exists.")
+      return redirect(url_for("index")) 
     new_game = host.create_new_game(name, notifiers, **config)
     asyncio.create_task(new_game.run_until_cancelled())
-    address = address_str(config["port"])
-    await flash("The Wheel has turned once again. " 
-        + "Your game will be available at {} soon.".format(address))
+    port = config["port"]
+    address = f"{SERVER_ADDRESS}:{port}"
+    await flash(
+      "The Wheel has turned once again. " 
+      f"Your game will be available at {address} soon."
+    )
     return redirect(url_for("index"))
 
   return await render_template("new_game.html", form = form)
@@ -93,24 +109,38 @@ async def new_game():
 async def game_status(name):
   host = app.config.get('host_instance')
   game_instance = host.find_game_by_name(name)
-  nations = host.nations
-  era = game_instance.settings["era"]
+  if not game_instance: abort(404)
+
   players = []
-  for key, value in game_instance.players.items():
-    name = nations[era][value]
-    if key in game_instance.eliminated: turn = "eliminated"
+  for player in game_instance.players:
+    if player["eliminated"]: turn = "eliminated"
     else:
       turn = "unknown"
       connected = False
       for _tuple in game_instance.who_played:
-        if _tuple[0] == key:
+        if _tuple[0] == player["shortname"]:
           turn = _tuple[1]
           connected = _tuple[2]
-    players.append((name, turn, connected))
-  if not game_instance: 
-    return "No such game."
+    players.append((player["name"], turn, connected))
+
+  time = Dom5Time(game_instance.turn)
+
+  return await render_template(
+    "game.html", 
+    game = game_instance, 
+    players = players, 
+    time = time
+  )
+
+@app.route("/games/<name>/<passcode>")
+async def game_admin(name, passcode):
+  host = app.config.get("host_instance")
+  game_instance = host.find_game_by_name(name)
+  if not game_instance: abort(404)
+  if passcode == passcode(game_instance):
+    return "Access granted!!"
   else:
-    return await render_template("game.html", game = game_instance, nations = nations, players = players)
+    abort(404)
 
 @app.route("/maps")
 async def map_directory():
@@ -118,23 +148,46 @@ async def map_directory():
   maps = host.maps
   return await render_template("maps.html", maps = maps)
 
+@app.route("/mods")
+async def mod_directory():
+  host = app.config.get("host_instance")
+  mods = host.mods
+  return await render_template("mods.html", mods = mods)
+
 @app.route("/thumb/<filename>")
 async def get_map_thumb(filename):
   host = app.config.get("host_instance")
   path = safe_join(host.map_path, filename)
   return await send_file(path)
 
+@app.route("/icon/<filename>")
+async def get_mod_icon(filename):
+  host = app.config.get("host_instance")
+  path = safe_join(host.mod_path, filename)
+  return await send_file(path)
+
+@app.route("/rand")
+async def random_nation():
+  host = app.config.get("host_instance")
+  era = int(request.args.get("era", default = 1))
+  if not era or era not in (1, 2, 3): era = 1
+  era_name = ("early", "middle", "late")[era-1]
+  nation = random.choice(list(host.nations[era].values()))
+  return await render_template(
+    "random_nation.html", 
+    nation = nation, 
+    era_name = era_name
+  )
+
 @app.before_serving
 async def startup():
   host = Host(HOST_ROOT_PATH)
   host.restore_games()
-  asyncio.create_task(host.get_nation_dict())
-  for game in host.games:
-    asyncio.create_task(game.run_until_cancelled())
+  asyncio.create_task(host.startup())
   map_choices = app.config.get("map_choices")
   map_choices.extend([(_map.filename, _map.title) for _map in host.maps])
-  print("MAPCHOICES:", map_choices)
-  print(id(map_choices))
+  mod_choices = app.config.get("mod_choices")
+  mod_choices.extend([(mod.filename, mod.title) for mod in host.mods])
   app.config.update(host_instance = host, map_choices = map_choices)
 
 @app.after_serving
@@ -143,6 +196,7 @@ async def shutdown():
 
 class NewGameForm(FlaskForm):
   map_choices = app.config.get("map_choices")
+  mod_choices = app.config.get("mod_choices")
 
   int_style = dict(style = "width: 12%", maxlength = 3)
   select_style = dict(style = "width: 40%")
@@ -171,6 +225,11 @@ class NewGameForm(FlaskForm):
   mapfile = SelectField("Choose a map:", 
     render_kw = select_style, choices = map_choices
     )
+
+  mods = SelectMultipleField("Choose mods to enable:", 
+    render_kw = select_style, choices = mod_choices
+    )
+
   randmap = IntegerField(
     "Provinces per player (only applicable to random maps):", 
     default = 15, render_kw = int_style
@@ -251,4 +310,21 @@ class NewGameForm(FlaskForm):
   )
 
   submit = SubmitField("Submit new game")
+
+class Dom5Time:
+
+  def __init__(self, turn):
+    self.season = (("early", "", "late")[turn % 3], ("spring", "summer", "fall", "winter")[(turn // 3) % 4])
+    self.year = turn // 12
+    self.month = (turn + 1) % 12
+    self.turn = turn
+
+  def __str__(self):
+    return f"{self.season[0]} {self.season[1]} in the year {self.year} of the Ascension Wars (turn {self.turn})"
+
+
+def passcode(game):
+  return shake_128((SECRET_KEY + game.name).encode("utf8")).hexdigest(8)
+
+
 

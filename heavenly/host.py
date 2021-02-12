@@ -3,14 +3,13 @@ import json
 import io
 import asyncio
 from copy import copy
-from subprocess import Popen, PIPE, STDOUT, TimeoutExpired
 from pathlib import Path
 from collections import namedtuple
-from datetime import datetime, timedelta
 import re
 
 from .notify import Notifier
 from .maps import Dom5Map
+from .mods import Dom5Mod
 from .dom5 import GAME_DEFAULTS, TCPServer, list_nations, STATUS_TURN_GEN, STATUS_ACTIVE, STATUS_INIT, STATUS_SETUP, STATUS_MAPGEN
 
 class Host:
@@ -18,14 +17,12 @@ class Host:
   def __init__(
       self, 
       root_path,
-      dom5_path = Path(os.environ.get("DOM5_PATH")).resolve(),
-      ping_interval = 20
+      dom5_path = Path(os.environ.get("DOM5_PATH")).resolve()
       ):
     self.games = []
     self.maps = []
+    self.mods = []
 
-    self.ping_interval = ping_interval
-    self.shutting_down = False
     self.status = {}
 
     self.port_range = (1024, 65535)
@@ -50,11 +47,9 @@ class Host:
       if file_path.suffix == ".map":
         self.maps.append(Dom5Map(file_path))
 
-  def validate_game_settings(self, name, **game_settings):
-    pass
-
-  async def get_nation_dict(self):
-    self.nations = await list_nations()
+    for file_path in self.mod_path.iterdir():
+      if file_path.suffix == ".dm":
+        self.mods.append(Dom5Mod(file_path))
 
   def get_free_port(self):
     lower, upper = self.port_range
@@ -67,11 +62,13 @@ class Host:
     new_game_path = self.savedgame_path / name
     settings_with_defaults = copy(GAME_DEFAULTS)
     settings_with_defaults.update(game_settings)
-    game = Game(name = name,
-                notifiers = notifiers,
-                game_settings = settings_with_defaults,
-                path = new_game_path,
-                dom5_path = self.dom5_path,
+    game = Game(
+      name = name,
+      notifiers = notifiers,
+      game_settings = settings_with_defaults,
+      path = new_game_path,
+      dom5_path = self.dom5_path,
+      host = self
     )
     self.games.append(game)
     return game
@@ -103,6 +100,7 @@ class Host:
         dict_, 
         path = path_to_game_files,
         dom5_path = self.dom5_path,
+        host = self
       )
       self.games.append(game)
     else:
@@ -126,29 +124,13 @@ class Host:
     for game in self.games:
       self.serialize_game(game)
 
-  async def ping(self):
-    await asyncio.sleep(self.ping_interval)
-    while not self.shutting_down:
-      timed_out = [
-        game
-        for game in self.games
-        if game.state == STATUS_TIMEOUT
-      ]
-      for game in timed_out:
-        print(game.name, "timed out.")
-        game.restart()
-      self.status = [copy(game.state) for game in self.games]
-      await asyncio.sleep(self.ping_interval)
-
   async def startup(self):
+    self.nations = await list_nations()
     for game in self.games:
       if not game.finished:
         asyncio.create_task(game.run_until_cancelled())
-        #if game.process is None: game.setup()
-        #elif game.process.poll() is not None: game.restart()
 
   def shutdown(self):
-    self.shutting_down = True
     self.dump_games()
     for game in self.games: game.shutdown()
 
@@ -156,11 +138,10 @@ class Game:
 
   metadata_format = set([
     "name",
-    "turn"
+    "turn",
     "finished",
     "notifiers",
     "players",
-    "eliminated"
     ]
   )
 
@@ -186,32 +167,44 @@ class Game:
     @self.when_status_change("players")
     def init_player_roster(prev, new):
       if not prev and new:
-        nation_ids_with_codes = {}
+        roster = []
+        era = self.settings["era"]
+        nations = copy(self.host.nations[era])
+        for mod in self.mods: nations.update(mod.nations)
+
         for nid, who_played in zip(new, self.who_played):
-          nation = who_played[0]
-          nation_ids_with_codes[nation] = nid
-        self.players = nation_ids_with_codes
+          if nid in nations: name = nations[nid]
+          else: name = f"{who_played[0]} {nid}"
+          roster.append(dict(
+            name = name,
+            shortname = who_played[0], 
+            number = nid, 
+            eliminated = False
+            )
+          )
+        print(roster)
+        self.players = roster
 
     @self.when_status_change("who_played")
     def check_for_eliminations(prev, new):
       if not prev or len(new) < len(prev):
-        for key, value in self.players.items():
-          if key in self.eliminated: pass
-          elif not any(player[0] == key for player in new):
-            self.eliminated[key] = value
+        for player in self.players:
+          if player["eliminated"]: pass
+          elif not any(wp[0] == player["shortname"] for wp in new):
+            player["eliminated"] = True
 
   def __init__(
       self, name, *,
       path, 
       dom5_path = Path(os.environ.get("DOM5_PATH")).resolve(),
+      host = None,
       notifiers = None, 
       finished = False, 
       turn = 0,
       players = None,
-      eliminated = None,
       game_settings = GAME_DEFAULTS):
     self.name = name
-    self.finished = False
+    self.finished = finished
 
     self.process = None
 
@@ -219,25 +212,30 @@ class Game:
     self.dom5_path = dom5_path
     self.path.mkdir(exist_ok = True)
 
+    self.host = host
+
     if not notifiers:
       self.notifiers = []
     else:
       self.notifiers = notifiers
 
     self.turn = turn
-    self.timeout = timedelta(seconds = 90)
     self.settings = copy(game_settings)
     if not players:
       players = {}
     self.players = players
-    if not eliminated:
-      eliminated = {}
-    self.eliminated = eliminated
+    
+    if self.settings.get("mapfile"):
+      self.map = list(filter(lambda m: m.filename == self.settings["mapfile"], host.maps))[0]
+
+    if self.settings.get("enablemod"):
+      self.mods = list(filter(lambda m: any(mod == m.filename for mod in self.settings["enablemod"]), host.mods))
+
 
     self.state = STATUS_INIT
     self.status_change_triggers = {}
     self._default_triggers()
-  
+
   def as_dict(self):
     game_settings = copy(self.settings)
     metadata = {
@@ -290,7 +288,7 @@ class Game:
   async def receive_updates(self):
     while True:
       await asyncio.sleep(1)
-      while self.process and self.process.update_queue:
+      while self.process and self.process.has_updates():
         update = self.process.update_queue.popleft()
         for key, value in update.__dict__.items():
           prev = self.__dict__.get(key)
@@ -299,7 +297,6 @@ class Game:
             self.on_status_change(key, prev, value)
 
   def on_status_change(self, name, prev, new):
-    #print("Status change: {} from {} to {}.".format(name, prev, new))
     if self.status_change_triggers.get(name):
       for func in self.status_change_triggers.get(name):
         func(prev, new)
@@ -319,12 +316,19 @@ class Game:
 
   def shutdown(self):
     if self.process and self.process.process.returncode is None: 
-      self.process.process.terminate()
+      self.process.die()
     self.process = None
 
   def restart(self):
     self.shutdown()
     self.setup()
+
+  def domcmd(self, command):
+    with open(self.path / "domcmd", "x") as file:
+      file.write(command)
+
+  def force_next_turn(self):
+    self.domcmd("settimeleft 1")
 
   def on_preexec(self):
     pass

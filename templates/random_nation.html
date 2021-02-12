@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+
+{% block content %}
+<center><h3>your random {{era_name}} age nation is:</h3></center>
+<center><h1>{{nation}}</h1></center>
+<center><h3>try again: <a href="{{url_for("random_nation", era = 1)}}">early</a>  <a href="{{url_for("random_nation", era = 2)}}">middle</a>  <a href="{{url_for("random_nation", era = 3)}}">late</a></h3></center>
+{% endblock %}

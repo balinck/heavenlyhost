@@ -5,18 +5,27 @@ Dom5 - {{game.name}}
 
 
 {% block content %}
-<h3> {{ game.name }} </h3>
-<h4> Status: {{ game.state }} </h4>
+{{super()}}
 
-<div class="col-sm-4">
+<div class="page-header">
+ <h3> {{game.name}}, turn {{time.turn}} </h3>
+ <h4> status: {{game.state}} </h4>
+ <h4> connections: {{game.connections}} </h4>
+<!-- <h4> time until next host: {{game.time_until_host.lower()}} </h4> -->
+ <h4> local time: year {{time.year}}, {{time.season[0]}} {{time.season[1]}} </h4>
+</div>
+
+<div class="col-sm-6">
 <table class="table">
   <tr>
     <th>Nation</th>
+    <th></th>
     <th>Turn</th>
   </tr>
 {% for player_status in players %}
   <tr>
-    <td>{{player_status[0]}}{{"*" if player_status[2]}}</td>
+    <td>{{player_status[0]}}</td>
+    <td><i>{{"connected" if player_status[2]}}</i></td>
     <td>{{player_status[1]}}</td>
   </tr>
 {% endfor %}

@@ -7,13 +7,13 @@ from collections import deque
 
 DOM5_PATH = Path(os.environ.get("DOM5_PATH")).resolve()
 
-STATUS_TIMEOUT = "Timed out"
-STATUS_MAPGEN = "Generating random map"
-STATUS_TURN_GEN = "Generating next turn"
-STATUS_ACTIVE = "Game is active"
-STATUS_SETUP = "Game is being setup"
-STATUS_INIT = "Game is initializing"
-STATUS_UNKNOWN = "Unknown"
+STATUS_TIMEOUT = "timed out"
+STATUS_MAPGEN = "generating random map"
+STATUS_TURN_GEN = "generating next turn"
+STATUS_ACTIVE = "active"
+STATUS_SETUP = "waiting to start"
+STATUS_INIT = "initializing"
+STATUS_UNKNOWN = "unknown"
 
 class GameUpdate:
   
@@ -31,11 +31,11 @@ class GameUpdate:
 class Setup(GameUpdate):
 
   regex = re.compile(
-      "^Setup port (?P<port>[0-9]+),?" 
-    + "(?P<time_until_start>[^()]*?) ?(?:\(.*\))?,?"
-    + " open: (?P<open>[0-9]+)," 
-    + " players (?P<player_count>[0-9]+)," 
-    + " ais (?P<ais>[0-9]+)$"
+    "^Setup port (?P<port>[0-9]+),?" 
+    "(?P<time_until_start>[^()]*?) ?(?:\(.*\))?,?"
+    " open: (?P<open>[0-9]+)," 
+    " players (?P<player_count>[0-9]+)," 
+    " ais (?P<ais>[0-9]+)$"
   )
 
   def __init__(self, match):
@@ -55,8 +55,8 @@ class Mapgen(GameUpdate):
 class Active(GameUpdate):
 
   regex = re.compile(
-      "(?P<name>[^ ,]+), Connections (?P<connections>[0-9]+)," 
-    + " (?P<time_until_host>[^()]*) (?:\(.*\))$"
+    "(?P<name>[^ ,]+), Connections (?P<connections>[0-9]+)," 
+    " (?P<time_until_host>[^()]*) (?:\(.*\))$"
   )
 
   def __init__(self, match):
@@ -74,7 +74,7 @@ class TurnAdvance(GameUpdate):
 class WhoPlayed(GameUpdate):
 
   regex = re.compile(
-    "^(?P<who_played>(?:\*?[a-zA-Z]{2,3}(?:\+|-) ?)+)$"
+    "^(?P<who_played>(?:\*?[a-zA-Z]{0,3}(?:\+|-) ?)+)$"
   )
 
   def __init__(self, match):
@@ -93,6 +93,11 @@ class PlayerList(GameUpdate):
   def __init__(self, players):
     self.players = players
 
+class GameOver(GameUpdate):
+
+  def __init__(self):
+    self.finished = True
+
 class Dom5Process:
 
   def __init__(
@@ -103,9 +108,14 @@ class Dom5Process:
       **kwargs):
     cl_args = ["-T", "-m"]
     for key, value in kwargs.items():
-      if key == "thrones" and value:
+      if key == "statuspage":
+        cl_args.extend(["--statuspage", "status.html"])
+      elif key == "thrones" and value:
         thrones = ["--thrones"] + [str(n) for n in value]
         cl_args.extend(thrones)
+      elif key == "enablemod" and value:
+        for mod in value:
+          cl_args.extend(["--enablemod", mod])
       elif value:
         cl_args.append("--" + key)
         if type(value) is not bool:
@@ -131,6 +141,9 @@ class Dom5Process:
       self.process.terminate()
       await self.process.wait()
 
+  def die(self):
+    self.process.terminate()
+
 class TCPServer(Dom5Process):
   update_types = [Setup, Active, Mapgen, WhoPlayed, TurnAdvance]
   
@@ -149,6 +162,7 @@ class TCPServer(Dom5Process):
 
     self.tasks.append(write_name())
     self.tasks.append(self.read_from_stdout())
+    self.tasks.append(self.check_for_gameover())
     self.update_queue = deque()
 
   async def read_from_stdout(self):
@@ -156,10 +170,17 @@ class TCPServer(Dom5Process):
       line = await self.process.stdout.readline()
       if line:
         line = line.decode()
+        #print(f"{self.port}: {line}")
         for update_type in type(self).update_types:
           update = update_type.match(line)
           if update:
             self.update_queue.append(update)
+
+  async def check_for_gameover(self):
+    await self.process.wait()
+    # TODO: handle "address already in use" error, which exits with return code 0.
+    if self.process.returncode == 0: 
+      self.update_queue.append(GameOver())
 
   async def query(self):
     query = TCPQuery(self.port)
@@ -177,6 +198,12 @@ class TCPServer(Dom5Process):
         players.append(nation_number)
     update = PlayerList(players)
     self.update_queue.append(update)
+
+  def has_updates(self):
+    return len(self.update_queue) > 0
+
+  def next_update(self):
+    return self.update_queue.popleft()
 
 class TCPQuery(Dom5Process):
   
@@ -216,6 +243,7 @@ GAME_DEFAULTS = {
   "noclientstart": False,       # --noclientstart Clients cannot start the game during Choose Participants
   "statuspage": False,          # --statuspage XX Create html page that shows who needs to play their turn
   "scoredump": False,           # --scoredump     Create a score file after each turn (scores.html)
+  "enablemod": False,           # --enabledmod    Enable the mod with filename XXX
 # World Contents
   "magicsites": 50,             # --magicsites X  Magic site frequency 0-75 (default 40)
   "indepstr": 5,                # --indepstr X    Strength of Independents 0-9 (default 5)
