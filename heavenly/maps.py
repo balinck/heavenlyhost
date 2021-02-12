@@ -2,6 +2,8 @@ from PIL import Image
 from pathlib import Path
 from copy import copy
 
+from .config.maps import MAP_THUMBNAIL_DIR
+
 class Dom5Map:
 
 	def __init__(self, path_to_map):
@@ -43,8 +45,8 @@ class Dom5Map:
 				eof = not bool(line)
 
 		with Image.open(path_to_map.parent / self.tga) as im:
-			self.thumbnail = self.tga + ".thumbnail"
+			self.thumbnail = (self.title + ".thumbnail").replace(" ", "")
 			im.thumbnail((256, 256))
 			im = im.convert("RGB")
-			im.save(path_to_map.parent / self.thumbnail, "JPEG")
+			im.save(MAP_THUMBNAIL_DIR / self.thumbnail, "JPEG")
 

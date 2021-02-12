@@ -155,14 +155,25 @@ class Game:
 
     @self.when_status_change("state")
     def request_player_list_on_start(prev, new):
-      if prev == STATUS_SETUP and new == STATUS_ACTIVE:
+      if (prev == STATUS_SETUP or prev == STATUS_MAPGEN) and new == STATUS_ACTIVE:
         loop = asyncio.get_running_loop()
         loop.create_task(self.process.request_player_list())
 
     @self.when_status_change("state")
     def increment_turn_on_start(prev, new):
-      if prev == STATUS_SETUP and new == STATUS_ACTIVE:
+      if (prev == STATUS_SETUP or prev == STATUS_MAPGEN) and new == STATUS_ACTIVE:
         self.turn += 1
+
+    @self.when_status_change("state")
+    def grab_map_on_start(prev, new):
+      if prev == STATUS_MAPGEN and new == STATUS_ACTIVE:
+        if self.map:
+          pass
+        else:
+          for file_path in self.path.iterdir():
+            if file_path.suffix == ".map":
+              self.map = Dom5Map(file_path)
+              break
 
     @self.when_status_change("players")
     def init_player_roster(prev, new):
@@ -182,7 +193,6 @@ class Game:
             eliminated = False
             )
           )
-        print(roster)
         self.players = roster
 
     @self.when_status_change("who_played")
@@ -192,6 +202,17 @@ class Game:
           if player["eliminated"]: pass
           elif not any(wp[0] == player["shortname"] for wp in new):
             player["eliminated"] = True
+
+  def _init_map_obj(self):
+    self.map = None
+    if self.settings.get("mapfile"):
+      self.map = list(filter(lambda m: m.filename == self.settings["mapfile"], host.maps))[0]
+    else: 
+      for file_path in self.path.iterdir():
+        if file_path.suffix == ".map":
+          self.map = Dom5Map(file_path)
+          break
+
 
   def __init__(
       self, name, *,
@@ -224,13 +245,13 @@ class Game:
     if not players:
       players = {}
     self.players = players
-    
-    if self.settings.get("mapfile"):
-      self.map = list(filter(lambda m: m.filename == self.settings["mapfile"], host.maps))[0]
 
     if self.settings.get("enablemod"):
       self.mods = list(filter(lambda m: any(mod == m.filename for mod in self.settings["enablemod"]), host.mods))
+    else:
+      self.mods = []
 
+    self._init_map_obj()
 
     self.state = STATUS_INIT
     self.status_change_triggers = {}

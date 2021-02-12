@@ -12,7 +12,7 @@ Dom5 - {{game.name}}
 
     <div class="col-lg-3">
       <h3> {{game.name}}, turn {{game.turn}} </h3>
-      <img src="/thumb/{{game.map.thumbnail}}">
+      {% if game.map %}<img src="/thumb/{{game.map.thumbnail}}">{% endif %}
     </div>
 
     <div class="col-lg-2">

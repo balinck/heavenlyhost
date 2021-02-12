@@ -14,6 +14,8 @@ import random
 from heavenly.host import Host
 from heavenly.notify import DiscordNotifier
 from heavenly.config.app import APP_NAME, SERVER_ADDRESS, MOTD, HOST_ROOT_PATH, SECRET_KEY
+from heavenly.maps import MAP_THUMBNAIL_DIR
+from heavenly.mods import MOD_ICON_DIR
 
 bootstrap = Bootstrap()
 app = Quart(__name__)
@@ -156,14 +158,12 @@ async def mod_directory():
 
 @app.route("/thumb/<filename>")
 async def get_map_thumb(filename):
-  host = app.config.get("host_instance")
-  path = safe_join(host.map_path, filename)
+  path = safe_join(MAP_THUMBNAIL_DIR, filename)
   return await send_file(path)
 
 @app.route("/icon/<filename>")
 async def get_mod_icon(filename):
-  host = app.config.get("host_instance")
-  path = safe_join(host.mod_path, filename)
+  path = safe_join(MOD_ICON_DIR, filename)
   return await send_file(path)
 
 @app.route("/rand")

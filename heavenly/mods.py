@@ -1,6 +1,8 @@
 from PIL import Image
 from pathlib import Path
 
+from .config.mods import MOD_ICON_DIR
+
 class Dom5Mod:
 
   def __init__(self, path_to_mod):
@@ -51,7 +53,7 @@ class Dom5Mod:
         self.nations[nid] = name
 
     with Image.open(path_to_mod.parent / self.icon) as im:
-      self.thumbnail = self.filename + ".thumbnail"
+      self.thumbnail = (self.title + ".thumbnail").replace(" ", "")
       im.thumbnail((256, 256))
       im = im.convert("RGB")
-      im.save(path_to_mod.parent / self.thumbnail, "JPEG")
+      im.save(MOD_ICON_DIR / self.thumbnail, "JPEG")
