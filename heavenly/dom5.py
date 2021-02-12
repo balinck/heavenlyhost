@@ -108,9 +108,7 @@ class Dom5Process:
       **kwargs):
     cl_args = ["-T", "-m"]
     for key, value in kwargs.items():
-      if key == "statuspage":
-        cl_args.extend(["--statuspage", "status.html"])
-      elif key == "thrones" and value:
+      if key == "thrones" and value:
         thrones = ["--thrones"] + [str(n) for n in value]
         cl_args.extend(thrones)
       elif key == "enablemod" and value:
