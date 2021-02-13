@@ -10,14 +10,14 @@ import re
 from .notify import Notifier
 from .maps import Dom5Map
 from .mods import Dom5Mod
-from .dom5 import GAME_DEFAULTS, TCPServer, list_nations, STATUS_TURN_GEN, STATUS_ACTIVE, STATUS_INIT, STATUS_SETUP, STATUS_MAPGEN
+from .dom5 import GAME_DEFAULTS, TCPServer, list_nations, STATUS_TURN_GEN, STATUS_ACTIVE, STATUS_INIT, STATUS_SETUP, STATUS_MAPGEN, DOM5_PATH
 
 class Host:
 
   def __init__(
       self, 
       root_path,
-      dom5_path = Path(os.environ.get("DOM5_PATH")).resolve(),
+      dom5_path = DOM5_PATH,
       port_range = (1024, 65535)
       ):
     self.games = []
@@ -207,7 +207,7 @@ class Game:
   def _init_map_obj(self):
     self.map = None
     if self.settings.get("mapfile"):
-      self.map = list(filter(lambda m: m.filename == self.settings["mapfile"], host.maps))[0]
+      self.map = list(filter(lambda m: m.filename == self.settings["mapfile"], self.host.maps))[0]
     else: 
       for file_path in self.path.iterdir():
         if file_path.suffix == ".map":
@@ -218,7 +218,7 @@ class Game:
   def __init__(
       self, name, *,
       path, 
-      dom5_path = Path(os.environ.get("DOM5_PATH")).resolve(),
+      dom5_path = DOM5_PATH,
       host = None,
       notifiers = None, 
       finished = False, 

@@ -5,7 +5,7 @@ import os
 import re
 from collections import deque
 
-DOM5_PATH = Path(os.environ.get("DOM5_PATH")).resolve()
+from .config.dom5 import DOM5_PATH
 
 STATUS_TIMEOUT = "timed out"
 STATUS_MAPGEN = "generating random map"

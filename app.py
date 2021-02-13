@@ -13,7 +13,7 @@ import random
 
 from heavenly.host import Host
 from heavenly.notify import DiscordNotifier
-from heavenly.config.app import APP_NAME, SERVER_ADDRESS, MOTD, HOST_ROOT_PATH, SECRET_KEY
+from heavenly.config.app import APP_NAME, SERVER_ADDRESS, MOTD, HOST_ROOT_PATH, HOST_PORT_RANGE, SECRET_KEY
 from heavenly.maps import MAP_THUMBNAIL_DIR
 from heavenly.mods import MOD_ICON_DIR
 
@@ -181,7 +181,7 @@ async def random_nation():
 
 @app.before_serving
 async def startup():
-  host = Host(HOST_ROOT_PATH)
+  host = Host(HOST_ROOT_PATH, port_range = HOST_PORT_RANGE)
   host.restore_games()
   asyncio.create_task(host.startup())
   map_choices = app.config.get("map_choices")
