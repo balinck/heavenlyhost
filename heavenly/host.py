@@ -17,7 +17,8 @@ class Host:
   def __init__(
       self, 
       root_path,
-      dom5_path = Path(os.environ.get("DOM5_PATH")).resolve()
+      dom5_path = Path(os.environ.get("DOM5_PATH")).resolve(),
+      port_range = (1024, 65535)
       ):
     self.games = []
     self.maps = []
@@ -25,7 +26,7 @@ class Host:
 
     self.status = {}
 
-    self.port_range = (1024, 65535)
+    self.port_range = port_range
 
     self.root = Path(root_path).resolve()
     self.dom5_path = dom5_path
