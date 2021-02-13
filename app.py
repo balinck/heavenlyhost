@@ -26,7 +26,7 @@ app.config.update({
   "SERVER_ADDRESS": SERVER_ADDRESS,
   "MOTD": MOTD,
   "map_choices": [("random", "Random")],
-  "mod_choices": [(None, "None")], 
+  "mod_choices": [], 
   "SECRET_KEY": SECRET_KEY,
   "SRC_REPO_URL": SRC_REPO_URL
 })
