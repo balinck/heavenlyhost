@@ -13,7 +13,7 @@ import random
 
 from heavenly.host import Host
 from heavenly.notify import DiscordNotifier
-from heavenly.config.app import APP_NAME, SERVER_ADDRESS, MOTD, HOST_ROOT_PATH, HOST_PORT_RANGE, SECRET_KEY
+from heavenly.config.app import APP_NAME, SERVER_ADDRESS, MOTD, HOST_ROOT_PATH, HOST_PORT_RANGE, SECRET_KEY, SRC_REPO_URL
 from heavenly.maps import MAP_THUMBNAIL_DIR
 from heavenly.mods import MOD_ICON_DIR
 
@@ -27,7 +27,8 @@ app.config.update({
   "MOTD": MOTD,
   "map_choices": [("random", "Random")],
   "mod_choices": [(None, "None")], 
-  "SECRET_KEY": SECRET_KEY
+  "SECRET_KEY": SECRET_KEY,
+  "SRC_REPO_URL": SRC_REPO_URL
 })
 
 app.jinja_env.globals.update(app.config)
