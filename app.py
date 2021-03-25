@@ -86,6 +86,7 @@ async def new_game():
               "allstoryevents": True if form.storyevents.data == "all" else False,
               "scoregraphs": True if form.scoregraphs.data == "always visible" else False,
               "nonationinfo": True if form.scoregraphs.data == "never visible" else False,
+              "teamgame": form.teamgame.data,
               "nocheatdet": not form.cheatdet.data,
               "renaming": form.renaming.data
     }
@@ -218,8 +219,7 @@ class NewGameForm(FlaskForm):
     ("2", "middle"), 
     ("3", "late")
     ]
-  ) 
-  teamgame = None
+  )
   clustered = None
   closed = None
   
@@ -294,6 +294,7 @@ class NewGameForm(FlaskForm):
     default = "default behavior",
     choices = ["always visible", "default behavior", "never visible"]
     )
+  teamgame = BooleanField("Disciple game")
   artrest = BooleanField("Restrict players to one artifact per turn", 
     default = True
     )
